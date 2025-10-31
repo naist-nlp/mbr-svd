@@ -6,7 +6,7 @@ from typing import Optional
 import torch
 from torch import Tensor
 
-from mbrs import functional
+from mbrs import functional, timer
 
 from mbrs.decoders import register
 from mbrs.decoders.mbr import DecoderMBR
@@ -53,7 +53,7 @@ class DecoderSvdMBR(DecoderMBR):
         - seed (int): Random seed.
         """
 
-        svd_threshold: float = Optional[float]  # type: ignore
+        svd_threshold: Optional[float] = None
         seed: int = 0
 
     def pairwise_scoring(
@@ -103,7 +103,7 @@ class DecoderSvdMBR(DecoderMBR):
             DecoderMBR.Output: The n-best hypotheses.
         """
 
-        if self.cfg.svd_threshold is None:
+        if self.cfg.svd_threshold is None: # Naive MBR decoding
             expected_scores = self.metric.expected_scores(
                 hypotheses, references, source, reference_lprobs=reference_lprobs
             )
@@ -111,10 +111,12 @@ class DecoderSvdMBR(DecoderMBR):
             pairwise_scores = self.pairwise_scoring(
                 hypotheses, references, source
             )
-            pairwise_scores = svd_decomposition(pairwise_scores, sv_threshold=self.cfg.svd_threshold)
-            expected_scores = functional.expectation(
-                pairwise_scores, lprobs=reference_lprobs
-            )
+            with timer.measure("svd_decomposition"):
+                pairwise_scores = svd_decomposition(pairwise_scores, sv_threshold=self.cfg.svd_threshold)
+            with timer.measure("expectation"):
+                expected_scores = functional.expectation(
+                    pairwise_scores, lprobs=reference_lprobs
+                )
 
         selector_outputs = self.select(
             hypotheses, expected_scores, nbest=nbest, source=source
