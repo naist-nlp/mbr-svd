@@ -5,7 +5,8 @@ from mbrs.metrics import MetricChrF, MetricCOMET
 from mbrs.selectors import Selector
 from mbrs.selectors.nbest import SelectorNbest
 
-from svd_mbr import DecoderSvdMBR
+from .svd_mbr import DecoderSvdMBR
+from mbrs.decoders import DecoderMBR
 
 SOURCE = [
     "これはテストです",
@@ -99,3 +100,34 @@ class TestDecoderSvdMBR:
             )
             assert len(output.sentence) == min(nbest, len(hyps))
             assert len(output.score) == min(nbest, len(hyps))
+    
+    @pytest.mark.parametrize("svd_threshold", [None, 0.0, 0.5, 50.0])
+    def test_decode_svd(self, svd_threshold: float | None):
+        metric = MetricChrF(MetricChrF.Config())
+        decoder = DecoderSvdMBR(
+            DecoderSvdMBR.Config(
+                svd_threshold=svd_threshold,
+            ),
+            metric,
+        )
+        naive_decoder = DecoderMBR(
+            DecoderMBR.Config(),
+            metric,
+        )
+        for i, (hyps, refs) in enumerate(zip(HYPOTHESES, REFERENCES)):
+            naive_output = naive_decoder.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
+            output = decoder.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
+            print(naive_output.score, output.score)
+            if svd_threshold is None or svd_threshold == 0.0:
+                assert output.idx == naive_output.idx
+                assert output.sentence == naive_output.sentence
+                assert torch.allclose(torch.tensor(output.score), torch.tensor(naive_output.score))
+            else:
+                # Different outputs when svd_threshold > 0
+                if all(output.ori_eigenvals >= svd_threshold):
+                    assert torch.allclose(output.ori_eigenvals, output.dec_eigenvals)
+                    assert torch.allclose(torch.tensor(output.score), torch.tensor(naive_output.score))
+                else:
+                    assert not torch.allclose(torch.tensor(output.score), torch.tensor(naive_output.score))
+                    assert len(output.ori_eigenvals) >= len(output.dec_eigenvals)
+

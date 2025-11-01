@@ -11,7 +11,7 @@ from mbrs import functional, timer
 from mbrs.decoders import register
 from mbrs.decoders.mbr import DecoderMBR
 
-def svd_decomposition(matrix: Tensor, sv_threshold=None) -> Tensor:
+def svd_decomposition(matrix: Tensor, sv_threshold=None) -> tuple[Tensor, Tensor, Tensor]:
     """Compute the singular value decomposition (SVD) of a matrix.
 
     Args:
@@ -24,18 +24,14 @@ def svd_decomposition(matrix: Tensor, sv_threshold=None) -> Tensor:
     if sv_threshold is not None:
         mask = S > sv_threshold
         U = U[:, mask]
-        S = S[mask]
+        S_dec = S[mask]
         Vh = Vh[mask, :]
-    decomposed_matrix = (U * S) @ Vh
-
-    print("U:", U)
-    print("S:", S)
-    print("Vh:", Vh)
+    decomposed_matrix = (U * S_dec) @ Vh
 
     assert decomposed_matrix.shape == matrix.shape, (
         f"Decomposed matrix shape {decomposed_matrix.shape} does not match original shape {matrix.shape}"
     )
-    return decomposed_matrix
+    return decomposed_matrix, S, S_dec
 
 
 @register("svd_mbr")
@@ -55,6 +51,14 @@ class DecoderSvdMBR(DecoderMBR):
 
         svd_threshold: Optional[float] = None
         seed: int = 0
+    
+    @dataclass
+    class Output(DecoderMBR.Output):
+        """Output of the SVD MBR decoder.
+        """
+        
+        ori_eigenvals: Optional[Tensor] = None
+        dec_eigenvals: Optional[Tensor] = None
 
     def pairwise_scoring(
         self,
@@ -88,7 +92,7 @@ class DecoderSvdMBR(DecoderMBR):
         source: Optional[str] = None,
         nbest: int = 1,
         reference_lprobs: Optional[Tensor] = None,
-    ) -> DecoderMBR.Output:
+    ) -> DecoderSvdMBR.Output:
         """Select the n-best hypotheses based on the strategy.
 
         Args:
@@ -112,7 +116,7 @@ class DecoderSvdMBR(DecoderMBR):
                 hypotheses, references, source
             )
             with timer.measure("svd_decomposition"):
-                pairwise_scores = svd_decomposition(pairwise_scores, sv_threshold=self.cfg.svd_threshold)
+                pairwise_scores, ori_eigenvals, dec_eigenvals = svd_decomposition(pairwise_scores, sv_threshold=self.cfg.svd_threshold)
             with timer.measure("expectation"):
                 expected_scores = functional.expectation(
                     pairwise_scores, lprobs=reference_lprobs
@@ -126,6 +130,7 @@ class DecoderSvdMBR(DecoderMBR):
                 idx=selector_outputs.idx,
                 sentence=selector_outputs.sentence,
                 score=selector_outputs.score,
+                ori_eigenvals=ori_eigenvals if self.cfg.svd_threshold is not None else None,
+                dec_eigenvals=dec_eigenvals if self.cfg.svd_threshold is not None else None,
             )
-            | selector_outputs
         )

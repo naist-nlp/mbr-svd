@@ -12,3 +12,11 @@ mbrs-decode \
   --decoder svd_mbr \
   --decoder.svd_threshold 0.5 \
   --metric chrf
+
+mbrs-decode \
+  --plugin_dir src/mbr_svd \
+  hypotheses.txt \
+  --num_candidates 4 \
+  --decoder svd_mbr \
+  --decoder.svd_threshold 70.0 \
+  --metric chrf
