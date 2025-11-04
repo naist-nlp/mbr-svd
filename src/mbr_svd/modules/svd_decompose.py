@@ -16,10 +16,16 @@ def svd_decomposition(matrix: Tensor, top_k=None, is_reduced=False) -> tuple[Ten
     """
     U, S, Vh = torch.linalg.svd(matrix, full_matrices=not is_reduced)
     if top_k is not None:
+        top_k = min(top_k, S.shape[0])
         U = U[:, :top_k]
         S = S[:top_k]
         Vh = Vh[:top_k, :]
-    decomposed_matrix = (U * S) @ Vh
+    if is_reduced:
+        decomposed_matrix = (U * S) @ Vh
+    else:
+        S_full = torch.zeros(U.shape[1], Vh.shape[0], dtype=matrix.dtype, device=matrix.device)
+        S_full[:S.shape[0], :S.shape[0]] = torch.diag(S)
+        decomposed_matrix = U @ S_full @ Vh
 
     assert decomposed_matrix.shape == matrix.shape, (
         f"Decomposed matrix shape {decomposed_matrix.shape} does not match original shape {matrix.shape}"
