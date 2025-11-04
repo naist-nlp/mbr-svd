@@ -1,1 +1,1 @@
-from .svd_mbr import DecoderSvdMBR
+from .decoders import DecoderSvdMBR

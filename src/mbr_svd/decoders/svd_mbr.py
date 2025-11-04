@@ -10,29 +10,7 @@ from mbrs import functional, timer
 
 from mbrs.decoders import register
 from mbrs.decoders.mbr import DecoderMBR
-
-def svd_decomposition(matrix: Tensor, sv_threshold=None) -> tuple[Tensor, Tensor, Tensor]:
-    """Compute the singular value decomposition (SVD) of a matrix.
-
-    Args:
-        matrix (Tensor): Input matrix of shape `(H, R)`.
-
-    Returns:
-        Tensor: Decomposed matrix after filtering small singular values.
-    """
-    U, S, Vh = torch.linalg.svd(matrix, full_matrices=False)
-    if sv_threshold is not None:
-        mask = S > sv_threshold
-        U = U[:, mask]
-        S_dec = S[mask]
-        Vh = Vh[mask, :]
-    decomposed_matrix = (U * S_dec) @ Vh
-
-    assert decomposed_matrix.shape == matrix.shape, (
-        f"Decomposed matrix shape {decomposed_matrix.shape} does not match original shape {matrix.shape}"
-    )
-    return decomposed_matrix, S, S_dec
-
+from ..modules.svd_decompose import svd_decomposition
 
 @register("svd_mbr")
 class DecoderSvdMBR(DecoderMBR):
@@ -45,11 +23,13 @@ class DecoderSvdMBR(DecoderMBR):
     class Config(DecoderMBR.Config):
         """Configuration for the decoder.
 
-        - svd_threshold (float, optional): Threshold for singular values. Singular values below this threshold will be discarded.
+        - top_k_sv (float, optional): Only get the top-k singular values. If None, no SVD is applied. if 0, all singular values are kept.
+        - is_reduced (bool): Whether to use reduced SVD.
         - seed (int): Random seed.
         """
 
-        svd_threshold: Optional[float] = None
+        top_k_sv: Optional[float] = None
+        is_reduced: bool = False
         seed: int = 0
     
     @dataclass
@@ -76,9 +56,6 @@ class DecoderSvdMBR(DecoderMBR):
         Returns:
             Tensor: Pairwise scores of shape `(H, R)`.
         """
-        H = len(hypotheses)
-        R = len(references)
-
         pairwise_scores = self.metric.pairwise_scores(
             hypotheses, references, source
         )
@@ -104,19 +81,21 @@ class DecoderSvdMBR(DecoderMBR):
               The shape must be `(len(references),)`. See `https://arxiv.org/abs/2311.05263`.
 
         Returns:
-            DecoderMBR.Output: The n-best hypotheses.
+            DecoderSvdMBR.Output: The n-best hypotheses.
         """
 
-        if self.cfg.svd_threshold is None: # Naive MBR decoding
+        if self.cfg.top_k_sv is None: # Naive MBR decoding
             expected_scores = self.metric.expected_scores(
                 hypotheses, references, source, reference_lprobs=reference_lprobs
             )
+            ori_eigenvals, dec_eigenvals = None, None
         else:  # SVD MBR decoding
             pairwise_scores = self.pairwise_scoring(
                 hypotheses, references, source
             )
             with timer.measure("svd_decomposition"):
-                pairwise_scores, ori_eigenvals, dec_eigenvals = svd_decomposition(pairwise_scores, sv_threshold=self.cfg.svd_threshold)
+                pairwise_scores, ori_eigenvals, dec_eigenvals = svd_decomposition(pairwise_scores, top_k=None if self.cfg.top_k_sv == 0 else self.cfg.top_k_sv,
+                                                                                   is_reduced=self.cfg.is_reduced)
             with timer.measure("expectation"):
                 expected_scores = functional.expectation(
                     pairwise_scores, lprobs=reference_lprobs
@@ -130,7 +109,7 @@ class DecoderSvdMBR(DecoderMBR):
                 idx=selector_outputs.idx,
                 sentence=selector_outputs.sentence,
                 score=selector_outputs.score,
-                ori_eigenvals=ori_eigenvals if self.cfg.svd_threshold is not None else None,
-                dec_eigenvals=dec_eigenvals if self.cfg.svd_threshold is not None else None,
+                ori_eigenvals=ori_eigenvals,
+                dec_eigenvals=dec_eigenvals,
             )
         )
