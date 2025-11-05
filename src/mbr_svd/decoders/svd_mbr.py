@@ -23,12 +23,12 @@ class DecoderSvdMBR(DecoderMBR):
     class Config(DecoderMBR.Config):
         """Configuration for the decoder.
 
-        - top_k_sv (float, optional): Only get the top-k singular values. If None, no SVD is applied. if 0, all singular values are kept.
+        - top_k_sv (int, optional): Only get the top-k singular values. If None, no SVD is applied. if 0, all singular values are kept.
         - is_reduced (bool): Whether to use reduced SVD.
         - seed (int): Random seed.
         """
 
-        top_k_sv: Optional[float] = None
+        top_k_sv: Optional[int] = None
         is_reduced: bool = False
         seed: int = 0
     
