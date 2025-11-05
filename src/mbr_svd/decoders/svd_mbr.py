@@ -37,8 +37,7 @@ class DecoderSvdMBR(DecoderMBR):
         """Output of the SVD MBR decoder.
         """
         
-        ori_eigenvals: Optional[Tensor] = None
-        dec_eigenvals: Optional[Tensor] = None
+        eigenvals: Optional[Tensor] = None
 
     def pairwise_scoring(
         self,
@@ -88,14 +87,17 @@ class DecoderSvdMBR(DecoderMBR):
             expected_scores = self.metric.expected_scores(
                 hypotheses, references, source, reference_lprobs=reference_lprobs
             )
-            ori_eigenvals, dec_eigenvals = None, None
+            eigenvals = None
         else:  # SVD MBR decoding
             pairwise_scores = self.pairwise_scoring(
                 hypotheses, references, source
             )
             with timer.measure("svd_decomposition"):
-                pairwise_scores, ori_eigenvals, dec_eigenvals = svd_decomposition(pairwise_scores, top_k=None if self.cfg.top_k_sv == 0 else self.cfg.top_k_sv,
-                                                                                   is_reduced=self.cfg.is_reduced)
+                pairwise_scores, eigenvals = svd_decomposition(
+                    pairwise_scores, 
+                    top_k=None if self.cfg.top_k_sv == 0 else self.cfg.top_k_sv,
+                    is_reduced=self.cfg.is_reduced
+                )
             with timer.measure("expectation"):
                 expected_scores = functional.expectation(
                     pairwise_scores, lprobs=reference_lprobs
@@ -109,7 +111,6 @@ class DecoderSvdMBR(DecoderMBR):
                 idx=selector_outputs.idx,
                 sentence=selector_outputs.sentence,
                 score=selector_outputs.score,
-                ori_eigenvals=ori_eigenvals,
-                dec_eigenvals=dec_eigenvals,
+                eigenvals=eigenvals,
             )
         )

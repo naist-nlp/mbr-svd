@@ -13,6 +13,7 @@ def svd_decomposition(matrix: Tensor, top_k=None, is_reduced=False) -> tuple[Ten
 
     Returns:
         Tensor: Decomposed matrix after filtering small singular values.
+        Tensor: Top-k singular values.
     """
     U, S, Vh = torch.linalg.svd(matrix, full_matrices=not is_reduced)
     if top_k is not None:

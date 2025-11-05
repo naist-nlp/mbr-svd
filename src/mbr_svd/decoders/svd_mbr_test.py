@@ -35,7 +35,7 @@ BEST_SENTENCES = [
     "Producția de zahăr primă va fi exprimată în ceea ce privește zahărul alb;",
 ]
 
-SVD_THRESHOLD = 0.5
+TOP_K = 0
 
 
 class TestDecoderSvdMBR:
@@ -43,7 +43,7 @@ class TestDecoderSvdMBR:
         metric = MetricChrF(MetricChrF.Config())
         decoder = DecoderSvdMBR(
             DecoderSvdMBR.Config(
-                svd_threshold=SVD_THRESHOLD,
+                top_k_sv=TOP_K,
             ),
             metric,
         )
@@ -56,7 +56,7 @@ class TestDecoderSvdMBR:
         metric_comet = MetricCOMET(MetricCOMET.Config())
         decoder = DecoderSvdMBR(
             DecoderSvdMBR.Config(
-                svd_threshold=SVD_THRESHOLD,
+                top_k_sv=TOP_K,
             ),
             metric_comet,
         )
@@ -81,7 +81,7 @@ class TestDecoderSvdMBR:
         metric = MetricChrF(MetricChrF.Config())
         decoder = DecoderSvdMBR(
             DecoderSvdMBR.Config(
-                svd_threshold=SVD_THRESHOLD,
+                top_k_sv=TOP_K,
             ),
             metric,
             selector=selector,
@@ -101,12 +101,12 @@ class TestDecoderSvdMBR:
             assert len(output.sentence) == min(nbest, len(hyps))
             assert len(output.score) == min(nbest, len(hyps))
     
-    @pytest.mark.parametrize("svd_threshold", [None, 0.0, 0.5, 50.0])
-    def test_decode_svd(self, svd_threshold: float | None):
+    @pytest.mark.parametrize("top_k_sv", [None, 0, 1, 2, 5, 10])
+    def test_decode_svd(self, top_k_sv: int | None):
         metric = MetricChrF(MetricChrF.Config())
         decoder = DecoderSvdMBR(
             DecoderSvdMBR.Config(
-                svd_threshold=svd_threshold,
+                top_k_sv=top_k_sv,
             ),
             metric,
         )
@@ -118,16 +118,17 @@ class TestDecoderSvdMBR:
             naive_output = naive_decoder.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
             output = decoder.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
             print(naive_output.score, output.score)
-            if svd_threshold is None or svd_threshold == 0.0:
-                assert output.idx == naive_output.idx
-                assert output.sentence == naive_output.sentence
-                assert torch.allclose(torch.tensor(output.score), torch.tensor(naive_output.score))
+            assert output.idx == naive_output.idx
+            assert output.sentence == naive_output.sentence
+            if top_k_sv is None:
+                torch.testing.assert_close(
+                    torch.tensor(output.score), torch.tensor(naive_output.score)
+                )
             else:
-                # Different outputs when svd_threshold > 0
-                if all(output.ori_eigenvals >= svd_threshold):
-                    assert torch.allclose(output.ori_eigenvals, output.dec_eigenvals)
-                    assert torch.allclose(torch.tensor(output.score), torch.tensor(naive_output.score))
+                if top_k_sv == 0 or top_k_sv >= len(hyps):
+                    torch.testing.assert_close(
+                        torch.tensor(output.score), torch.tensor(naive_output.score)
+                    )
                 else:
                     assert not torch.allclose(torch.tensor(output.score), torch.tensor(naive_output.score))
-                    assert len(output.ori_eigenvals) >= len(output.dec_eigenvals)
-
+                    assert len(output.eigenvals) == min(top_k_sv, len(hyps))
