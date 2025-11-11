@@ -1,14 +1,20 @@
+from typing import Optional
 import torch
 from torch import Tensor
 
 import numpy as np
 
-def svd_decomposition(matrix: Tensor, top_k=None, is_reduced=False) -> tuple[Tensor, Tensor]:
+def svd_decomposition(
+    matrix: Tensor, 
+    top_k: Optional[int]=None,
+    bottom_k: Optional[int]=None, 
+    is_reduced=False) -> tuple[Tensor, Tensor]:
     """Compute the singular value decomposition (SVD) of a matrix.
 
     Args:
         matrix (Tensor): Input matrix of shape `(H, R)`.
         top_k (int, optional): Number of top singular values to keep. If None, keep all.
+        bottom_k (int, optional): Number of bottom singular values to keep. If None, keep all. If both top_k and bottom_k are provided, ignore bottom_k.
         is_reduced (bool, optional): Whether to use reduced SVD.
 
     Returns:
@@ -16,11 +22,18 @@ def svd_decomposition(matrix: Tensor, top_k=None, is_reduced=False) -> tuple[Ten
         Tensor: Top-k singular values.
     """
     U, S, Vh = torch.linalg.svd(matrix, full_matrices=not is_reduced)
+    if bottom_k and top_k:
+        bottom_k = None  # Ignore bottom_k if top_k is provided
     if top_k is not None:
         top_k = min(top_k, S.shape[0])
         U = U[:, :top_k]
         S = S[:top_k]
         Vh = Vh[:top_k, :]
+    elif bottom_k is not None:
+        bottom_k = min(bottom_k, S.shape[0])
+        U = U[:, -bottom_k:]
+        S = S[-bottom_k:]
+        Vh = Vh[-bottom_k:, :]
     if is_reduced:
         decomposed_matrix = (U * S) @ Vh
     else:

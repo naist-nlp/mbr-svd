@@ -36,6 +36,10 @@ BEST_SENTENCES = [
 ]
 
 TOP_K = 0
+BOTTOM_K = None
+
+top_k_el = [None, 0, 1, 2, 5, 10]
+bottom_k_el = [None, 0, 1, 2, 5, 10]
 
 
 class TestDecoderSvdMBR:
@@ -100,13 +104,14 @@ class TestDecoderSvdMBR:
             )
             assert len(output.sentence) == min(nbest, len(hyps))
             assert len(output.score) == min(nbest, len(hyps))
-    
-    @pytest.mark.parametrize("top_k_sv", [None, 0, 1, 2, 5, 10])
-    def test_decode_svd(self, top_k_sv: int | None):
+
+    @pytest.mark.parametrize("top_k_sv, bottom_k_sv", [(t_k, b_k) for t_k in top_k_el for b_k in bottom_k_el])
+    def test_decode_svd(self, top_k_sv: int | None, bottom_k_sv: int | None):
         metric = MetricChrF(MetricChrF.Config())
         decoder = DecoderSvdMBR(
             DecoderSvdMBR.Config(
                 top_k_sv=top_k_sv,
+                bottom_k_sv=bottom_k_sv,
             ),
             metric,
         )
@@ -120,12 +125,12 @@ class TestDecoderSvdMBR:
             print(naive_output.score, output.score)
             assert output.idx == naive_output.idx
             assert output.sentence == naive_output.sentence
-            if top_k_sv is None:
+            if top_k_sv is None and bottom_k_sv is None:
                 torch.testing.assert_close(
                     torch.tensor(output.score), torch.tensor(naive_output.score)
                 )
             else:
-                if top_k_sv == 0 or top_k_sv >= len(hyps):
+                if (top_k_sv == 0 and bottom_k_sv == 0) or (top_k_sv >= len(hyps) and (bottom_k_sv is None or bottom_k_sv >= len(hyps))):
                     torch.testing.assert_close(
                         torch.tensor(output.score), torch.tensor(naive_output.score)
                     )
