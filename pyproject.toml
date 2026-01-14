@@ -3,8 +3,11 @@ name = "mbr-svd"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "mbrs>=0.1.7",
     "pytest>=8.4.2",
+    "scikit-learn>=1.7.2",
+    "seaborn>=0.13.2",
+    "torchnmf>=0.3.5",
 ]
