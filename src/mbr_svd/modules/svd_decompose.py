@@ -8,7 +8,9 @@ def svd_decomposition(
     matrix: Tensor, 
     top_k: Optional[int]=None,
     bottom_k: Optional[int]=None, 
-    is_reduced=False) -> tuple[Tensor, Tensor]:
+    is_reduced=False,
+    device: Optional[torch.device]=None
+    ) -> tuple[Tensor, Tensor]:
     """Compute the singular value decomposition (SVD) of a matrix.
 
     Args:
@@ -16,11 +18,18 @@ def svd_decomposition(
         top_k (int, optional): Number of top singular values to keep. If None, keep all.
         bottom_k (int, optional): Number of bottom singular values to keep. If None, keep all. If both top_k and bottom_k are provided, ignore bottom_k.
         is_reduced (bool, optional): Whether to use reduced SVD.
-
+        device (torch.device, optional): Device to perform computation on. If None, use GPU if available.
     Returns:
         Tensor: Decomposed matrix after filtering small singular values.
         Tensor: Top-k singular values.
     """
+    if device is None:
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        else:
+            device = torch.device("cpu")
+
+    matrix = matrix.to(device)
     U, S, Vh = torch.linalg.svd(matrix, full_matrices=not is_reduced)
     if bottom_k and top_k:
         bottom_k = None  # Ignore bottom_k if top_k is provided
@@ -44,4 +53,13 @@ def svd_decomposition(
     assert decomposed_matrix.shape == matrix.shape, (
         f"Decomposed matrix shape {decomposed_matrix.shape} does not match original shape {matrix.shape}"
     )
+    
+    if device == torch.device("cuda"):
+        torch.cuda.synchronize()
+        decomposed_matrix = decomposed_matrix.detach().cpu()
+        S = S.detach().cpu()
+    else:
+        decomposed_matrix = decomposed_matrix.detach()
+        S = S.detach()
+
     return decomposed_matrix, S

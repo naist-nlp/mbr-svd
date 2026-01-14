@@ -9,58 +9,26 @@ from torch import Tensor
 from mbrs import functional, timer
 
 from mbrs.decoders import register
-from mbrs.decoders.mbr import DecoderMBR
+from ..decoders.svd_mbr import DecoderSvdMBR
+from ..modules.z_score_norm import z_score_norm
 from ..modules.svd_decompose import svd_decomposition
 
-@register("svd_mbr")
-class DecoderSvdMBR(DecoderMBR):
+@register("normed_svd_mbr")
+class DecoderNormedSvdMBR(DecoderSvdMBR):
     """SVD-based MBR decoder.
+    However, before decomposing the pairwise score matrix, each row is normalized using z-score normalization.
     """
 
     cfg: Config
 
     @dataclass
-    class Config(DecoderMBR.Config):
+    class Config(DecoderSvdMBR.Config):
         """Configuration for the decoder.
-
-        - top_k_sv (int, optional): Only get the top-k singular values. If None, no SVD is applied. if 0, all singular values are kept.
-        - bottom_k_sv (int, optional): Only get the bottom-k singular values. If None, no SVD is applied. if 0, all singular values are kept.
-        - is_reduced (bool): Whether to use reduced SVD.
+        Initially inherits from DecoderSvdMBR.Config.
+        - norm_dim (int, optional): Dimension along which to normalize. If None, normalize over the entire matrix.
         """
-
-        top_k_sv: Optional[int] = None
-        bottom_k_sv: Optional[int] = None
-        is_reduced: bool = False
-    
-    @dataclass
-    class Output(DecoderMBR.Output):
-        """Output of the SVD MBR decoder.
-        """
-        original_matrix: Optional[Tensor] = None
-        singularvals: Optional[Tensor] = None
-        decomposed_matrix: Optional[Tensor] = None
-
-    def pairwise_scoring(
-        self,
-        hypotheses: list[str],
-        references: list[str],
-        source: Optional[str] = None,
-    ) -> Tensor:
-        """Compute pairwise scores using the Naive MBR algorithm.
-
-        Args:
-            hypotheses (list[str]): Hypotheses.
-            references (list[str]): References.
-            source (str, optional): A source.
-
-        Returns:
-            Tensor: Pairwise scores of shape `(H, R)`.
-        """
-        pairwise_scores = self.metric.pairwise_scores(
-            hypotheses, references, source
-        )
-
-        return pairwise_scores
+        norm_dim: Optional[int] = None
+        norm_eps: float = 1e-8
 
     def decode(
         self,
@@ -69,7 +37,7 @@ class DecoderSvdMBR(DecoderMBR):
         source: Optional[str] = None,
         nbest: int = 1,
         reference_lprobs: Optional[Tensor] = None,
-    ) -> DecoderSvdMBR.Output:
+    ) -> DecoderNormedSvdMBR.Output:
         """Select the n-best hypotheses based on the strategy.
 
         Args:
@@ -81,7 +49,7 @@ class DecoderSvdMBR(DecoderMBR):
               The shape must be `(len(references),)`. See `https://arxiv.org/abs/2311.05263`.
 
         Returns:
-            DecoderSvdMBR.Output: The n-best hypotheses.
+            DecoderNormedSvdMBR.Output: The n-best hypotheses.
         """
 
         if self.cfg.top_k_sv is None and self.cfg.bottom_k_sv is None: # Naive MBR decoding
@@ -91,7 +59,7 @@ class DecoderSvdMBR(DecoderMBR):
             singularvals = None
             original_matrix = None
             decomposed_matrix = None
-        else:  # SVD MBR decoding
+        else:  # Normed SVD MBR decoding
             pairwise_scores = self.pairwise_scoring(
                 hypotheses, references, source
             )
@@ -100,6 +68,13 @@ class DecoderSvdMBR(DecoderMBR):
                 "shape": pairwise_scores.shape,
                 "dtype": str(pairwise_scores.dtype)
             }
+            with timer.measure("z_score_normalization"):
+                pairwise_scores = z_score_norm(pairwise_scores, dim=self.cfg.norm_dim, epsilon=self.cfg.norm_eps)
+
+            if not torch.isfinite(pairwise_scores).all():
+                print("Pairwise scores after normalization:", pairwise_scores)
+                raise ValueError("Non-finite values found in the normalized pairwise score matrix.")
+
             with timer.measure("svd_decomposition"):
                 pairwise_scores, singularvals = svd_decomposition(
                     pairwise_scores, 

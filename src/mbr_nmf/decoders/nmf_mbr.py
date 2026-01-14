@@ -10,11 +10,11 @@ from mbrs import functional, timer
 
 from mbrs.decoders import register
 from mbrs.decoders.mbr import DecoderMBR
-from ..modules.svd_decompose import svd_decomposition
+from ..modules.nmf_decompose import nmf_decomposition
 
-@register("svd_mbr")
-class DecoderSvdMBR(DecoderMBR):
-    """SVD-based MBR decoder.
+@register("nmf_mbr")
+class DecoderNmfMBR(DecoderMBR):
+    """NMF-based MBR decoder.
     """
 
     cfg: Config
@@ -23,22 +23,25 @@ class DecoderSvdMBR(DecoderMBR):
     class Config(DecoderMBR.Config):
         """Configuration for the decoder.
 
-        - top_k_sv (int, optional): Only get the top-k singular values. If None, no SVD is applied. if 0, all singular values are kept.
-        - bottom_k_sv (int, optional): Only get the bottom-k singular values. If None, no SVD is applied. if 0, all singular values are kept.
-        - is_reduced (bool): Whether to use reduced SVD.
+        - rank (Optional[int]): Rank for NMF decomposition. If None, no decomposition is applied. If 0, use min(H, R)//2.
+        - beta (float): Beta divergence for NMF decomposition. Default is 1.0 (Kullback-Leibler divergence).
+        - l1_ratio (float): L1 regularization ratio for NMF decomposition. Default is 0.0.
+        - device (Optional[torch.device]): Device to perform NMF decomposition. If None, automatically select CPU or GPU.
         """
-
-        top_k_sv: Optional[int] = None
-        bottom_k_sv: Optional[int] = None
-        is_reduced: bool = False
+        
+        rank: Optional[int] = None
+        beta: float = 1.0
+        l1_ratio: float = 0.0
+        device: Optional[torch.device] = None
     
     @dataclass
     class Output(DecoderMBR.Output):
-        """Output of the SVD MBR decoder.
+        """Output of the NMF MBR decoder.
         """
         original_matrix: Optional[Tensor] = None
-        singularvals: Optional[Tensor] = None
         decomposed_matrix: Optional[Tensor] = None
+        W: Optional[Tensor] = None
+        H: Optional[Tensor] = None
 
     def pairwise_scoring(
         self,
@@ -69,7 +72,7 @@ class DecoderSvdMBR(DecoderMBR):
         source: Optional[str] = None,
         nbest: int = 1,
         reference_lprobs: Optional[Tensor] = None,
-    ) -> DecoderSvdMBR.Output:
+    ) -> DecoderNmfMBR.Output:
         """Select the n-best hypotheses based on the strategy.
 
         Args:
@@ -81,17 +84,18 @@ class DecoderSvdMBR(DecoderMBR):
               The shape must be `(len(references),)`. See `https://arxiv.org/abs/2311.05263`.
 
         Returns:
-            DecoderSvdMBR.Output: The n-best hypotheses.
+            DecoderNmfMBR.Output: The n-best hypotheses.
         """
 
-        if self.cfg.top_k_sv is None and self.cfg.bottom_k_sv is None: # Naive MBR decoding
+        if self.cfg.rank is None: # Naive MBR decoding
             expected_scores = self.metric.expected_scores(
                 hypotheses, references, source, reference_lprobs=reference_lprobs
             )
-            singularvals = None
             original_matrix = None
             decomposed_matrix = None
-        else:  # SVD MBR decoding
+            W = None
+            H = None
+        else:  # NMF MBR decoding
             pairwise_scores = self.pairwise_scoring(
                 hypotheses, references, source
             )
@@ -100,22 +104,28 @@ class DecoderSvdMBR(DecoderMBR):
                 "shape": pairwise_scores.shape,
                 "dtype": str(pairwise_scores.dtype)
             }
-            with timer.measure("svd_decomposition"):
-                pairwise_scores, singularvals = svd_decomposition(
+            with timer.measure("nmf_decomposition"):
+                pairwise_scores, W, H = nmf_decomposition(
                     pairwise_scores, 
-                    top_k=None if self.cfg.top_k_sv == 0 else self.cfg.top_k_sv,
-                    bottom_k=None if self.cfg.bottom_k_sv == 0 else self.cfg.bottom_k_sv,
-                    is_reduced=self.cfg.is_reduced
+                    rank=self.cfg.rank, 
+                    beta=self.cfg.beta, 
+                    l1_ratio=self.cfg.l1_ratio,
+                    device=self.cfg.device
                 )
-                singularvals = {
-                    "data": singularvals.tolist(),
-                    "shape": singularvals.shape,
-                    "dtype": str(singularvals.dtype)
-                }
                 decomposed_matrix = {
                     "data": pairwise_scores.tolist(),
                     "shape": pairwise_scores.shape,
                     "dtype": str(pairwise_scores.dtype)
+                }
+                W = {
+                    "data": W.tolist(),
+                    "shape": W.shape,
+                    "dtype": str(W.dtype)
+                }
+                H = {
+                    "data": H.tolist(),
+                    "shape": H.shape,
+                    "dtype": str(H.dtype)
                 }
             with timer.measure("expectation"):
                 expected_scores = functional.expectation(
@@ -130,8 +140,9 @@ class DecoderSvdMBR(DecoderMBR):
                 idx=selector_outputs.idx,
                 sentence=selector_outputs.sentence,
                 score=selector_outputs.score,
-                singularvals=singularvals,
                 original_matrix=original_matrix,
                 decomposed_matrix=decomposed_matrix,
+                W=W,
+                H=H,
             )
         )

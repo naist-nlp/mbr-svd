@@ -142,7 +142,7 @@ def assert_valid_svd(A, U, S_vec, Vh):
             # Check if the "inverse" is true (A*v_i = -s_i*u_i)
             # This should never happen, but shows the mismatch
             is_inverse = torch.allclose(LHS, -RHS)
-            is_same_val = LHS.abs() == RHS.abs()
+            is_same_val = (LHS.abs() == RHS.abs()).all()
             if is_inverse or is_same_val:
                 continue
             print(f"  Component {i}: FAILED")

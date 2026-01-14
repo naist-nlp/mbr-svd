@@ -1,11 +1,12 @@
 import pytest
 import torch
+import numpy as np
 
 from mbrs.metrics import MetricChrF, MetricCOMET
 from mbrs.selectors import Selector
 from mbrs.selectors.nbest import SelectorNbest
 
-from .svd_mbr import DecoderSvdMBR
+from .normed_svd_mbr import DecoderNormedSvdMBR
 from mbrs.decoders import DecoderMBR
 
 SOURCE = [
@@ -37,17 +38,20 @@ BEST_SENTENCES = [
 
 TOP_K = 0
 BOTTOM_K = None
+NORM_DIM = None
 
 top_k_el = [None, 0, 1, 2, 5, 10]
-bottom_k_el = [None, 0, 1, 2, 5, 10]
+bottom_k_el = [None, 0, 1]
+norm_dim_el = [None, 0, 1]
 
 
-class TestDecoderSvdMBR:
+class TestDecoderNormedSvdMBR:
     def test_decode_chrf(self):
         metric = MetricChrF(MetricChrF.Config())
-        decoder = DecoderSvdMBR(
-            DecoderSvdMBR.Config(
+        decoder = DecoderNormedSvdMBR(
+            DecoderNormedSvdMBR.Config(
                 top_k_sv=TOP_K,
+                norm_dim=NORM_DIM,
             ),
             metric,
         )
@@ -58,9 +62,10 @@ class TestDecoderSvdMBR:
 
     def test_decode_comet(self):
         metric_comet = MetricCOMET(MetricCOMET.Config())
-        decoder = DecoderSvdMBR(
-            DecoderSvdMBR.Config(
+        decoder = DecoderNormedSvdMBR(
+            DecoderNormedSvdMBR.Config(
                 top_k_sv=TOP_K,
+                norm_dim=NORM_DIM,
             ),
             metric_comet,
         )
@@ -83,9 +88,10 @@ class TestDecoderSvdMBR:
     def test_decode_selector(self, nbest: int):
         selector = SelectorNbest(SelectorNbest.Config())
         metric = MetricChrF(MetricChrF.Config())
-        decoder = DecoderSvdMBR(
-            DecoderSvdMBR.Config(
+        decoder = DecoderNormedSvdMBR(
+            DecoderNormedSvdMBR.Config(
                 top_k_sv=TOP_K,
+                norm_dim=NORM_DIM,
             ),
             metric,
             selector=selector,
@@ -105,13 +111,14 @@ class TestDecoderSvdMBR:
             assert len(output.sentence) == min(nbest, len(hyps))
             assert len(output.score) == min(nbest, len(hyps))
 
-    @pytest.mark.parametrize("top_k_sv, bottom_k_sv", [(t_k, b_k) for t_k in top_k_el for b_k in bottom_k_el])
-    def test_decode_svd(self, top_k_sv: int | None, bottom_k_sv: int | None):
+    @pytest.mark.parametrize("top_k_sv, bottom_k_sv, norm_dim", [(t_k, b_k, n_d) for t_k in top_k_el for b_k in bottom_k_el for n_d in norm_dim_el])
+    def test_decode_svd(self, top_k_sv: int | None, bottom_k_sv: int | None, norm_dim: int | None):
         metric = MetricChrF(MetricChrF.Config())
-        decoder = DecoderSvdMBR(
-            DecoderSvdMBR.Config(
+        decoder = DecoderNormedSvdMBR(
+            DecoderNormedSvdMBR.Config(
                 top_k_sv=top_k_sv,
                 bottom_k_sv=bottom_k_sv,
+                norm_dim=norm_dim,
             ),
             metric,
         )
@@ -122,18 +129,28 @@ class TestDecoderSvdMBR:
         for i, (hyps, refs) in enumerate(zip(HYPOTHESES, REFERENCES)):
             naive_output = naive_decoder.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
             output = decoder.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
+            print("scores")
             print(naive_output.score, output.score)
-            assert output.idx == naive_output.idx
-            assert output.sentence == naive_output.sentence
-            if top_k_sv is None and bottom_k_sv is None:
+            assert len(output.sentence) == len(naive_output.sentence)
+            assert len(output.score) == len(naive_output.score)
+            if (top_k_sv is None and bottom_k_sv is None) or (len(hyps) <= 1):
+                assert output.idx == naive_output.idx
+                assert output.sentence == naive_output.sentence
                 torch.testing.assert_close(
                     torch.tensor(output.score), torch.tensor(naive_output.score)
                 )
             else:
-                if (top_k_sv == 0 and bottom_k_sv == 0) or (top_k_sv >= len(hyps) and (bottom_k_sv is None or bottom_k_sv >= len(hyps))):
-                    torch.testing.assert_close(
-                        torch.tensor(output.score), torch.tensor(naive_output.score)
-                    )
+                assert output.original_matrix["shape"] == output.decomposed_matrix["shape"]
+                if top_k_sv is not None:
+                    if top_k_sv == 0 and bottom_k_sv != 0:
+                        assert output.singularvals["shape"][0] == np.nanmin(np.array([len(hyps), len(refs), bottom_k_sv], dtype=np.float32))
+                    elif top_k_sv == 0 and bottom_k_sv == 0:
+                        assert output.singularvals["shape"][0] == np.nanmin(np.array([len(hyps), len(refs)], dtype=np.float32))
+                    else:
+                        assert output.singularvals["shape"][0] == np.nanmin(np.array([top_k_sv, len(hyps), len(refs)], dtype=np.float32))
                 else:
-                    assert not torch.allclose(torch.tensor(output.score), torch.tensor(naive_output.score))
-                    assert len(output.singularvals) == min(top_k_sv, len(hyps))
+                    if bottom_k_sv == 0:
+                        assert output.singularvals["shape"][0] == np.nanmin(np.array([len(hyps), len(refs)], dtype=np.float32))
+                    else:
+                        assert output.singularvals["shape"][0] == np.nanmin(np.array([len(hyps), len(refs), bottom_k_sv], dtype=np.float32))
+
