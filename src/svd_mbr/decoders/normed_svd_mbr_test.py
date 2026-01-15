@@ -119,6 +119,7 @@ class TestDecoderNormedSvdMBR:
                 top_k_sv=top_k_sv,
                 bottom_k_sv=bottom_k_sv,
                 norm_dim=norm_dim,
+                save_components=True,
             ),
             metric,
         )
@@ -140,17 +141,17 @@ class TestDecoderNormedSvdMBR:
                     torch.tensor(output.score), torch.tensor(naive_output.score)
                 )
             else:
-                assert output.original_matrix["shape"] == output.decomposed_matrix["shape"]
+                assert output.original_matrix.shape == output.decomposed_matrix.shape
                 if top_k_sv is not None:
                     if top_k_sv == 0 and bottom_k_sv != 0:
-                        assert output.singularvals["shape"][0] == np.nanmin(np.array([len(hyps), len(refs), bottom_k_sv], dtype=np.float32))
+                        assert output.singularvals.shape[0] == np.nanmin(np.array([len(hyps), len(refs), bottom_k_sv], dtype=np.float32))
                     elif top_k_sv == 0 and bottom_k_sv == 0:
-                        assert output.singularvals["shape"][0] == np.nanmin(np.array([len(hyps), len(refs)], dtype=np.float32))
+                        assert output.singularvals.shape[0] == np.nanmin(np.array([len(hyps), len(refs)], dtype=np.float32))
                     else:
-                        assert output.singularvals["shape"][0] == np.nanmin(np.array([top_k_sv, len(hyps), len(refs)], dtype=np.float32))
+                        assert output.singularvals.shape[0] == np.nanmin(np.array([top_k_sv, len(hyps), len(refs)], dtype=np.float32))
                 else:
                     if bottom_k_sv == 0:
-                        assert output.singularvals["shape"][0] == np.nanmin(np.array([len(hyps), len(refs)], dtype=np.float32))
+                        assert output.singularvals.shape[0] == np.nanmin(np.array([len(hyps), len(refs)], dtype=np.float32))
                     else:
-                        assert output.singularvals["shape"][0] == np.nanmin(np.array([len(hyps), len(refs), bottom_k_sv], dtype=np.float32))
+                        assert output.singularvals.shape[0] == np.nanmin(np.array([len(hyps), len(refs), bottom_k_sv], dtype=np.float32))
 

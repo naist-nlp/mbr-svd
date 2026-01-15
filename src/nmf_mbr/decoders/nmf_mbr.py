@@ -27,12 +27,14 @@ class DecoderNmfMBR(DecoderMBR):
         - beta (float): Beta divergence for NMF decomposition. Default is 1.0 (Kullback-Leibler divergence).
         - l1_ratio (float): L1 regularization ratio for NMF decomposition. Default is 0.0.
         - device (Optional[torch.device]): Device to perform NMF decomposition. If None, automatically select CPU or GPU.
+        - save_components (bool): Whether to save calculated components or not
         """
         
         rank: Optional[int] = None
         beta: float = 1.0
         l1_ratio: float = 0.0
         device: Optional[torch.device] = None
+        save_components: bool = False
     
     @dataclass
     class Output(DecoderMBR.Output):
@@ -59,11 +61,12 @@ class DecoderNmfMBR(DecoderMBR):
         Returns:
             Tensor: Pairwise scores of shape `(H, R)`.
         """
-        pairwise_scores = self.metric.pairwise_scores(
-            hypotheses, references, source
-        )
+        with timer.measure("pairwise_scoring"):
+            pairwise_scores = self.metric.pairwise_scores(
+                hypotheses, references, source
+            )
 
-        return pairwise_scores
+        return pairwise_scores 
 
     def decode(
         self,
@@ -86,63 +89,53 @@ class DecoderNmfMBR(DecoderMBR):
         Returns:
             DecoderNmfMBR.Output: The n-best hypotheses.
         """
+        pairwise_scores = self.pairwise_scoring(hypotheses, references, source)
 
         if self.cfg.rank is None: # Naive MBR decoding
-            expected_scores = self.metric.expected_scores(
-                hypotheses, references, source, reference_lprobs=reference_lprobs
-            )
-            original_matrix = None
-            decomposed_matrix = None
+            print("Warning: Using Naive MBR decoding instead of NMF MBR decoding.")
+            with timer.measure("expectation"):
+                expected_scores = functional.expectation(
+                    matrix=pairwise_scores,
+                    lprobs=reference_lprobs,
+                )
             W = None
             H = None
+            dec_pairwise_scores = None
         else:  # NMF MBR decoding
-            pairwise_scores = self.pairwise_scoring(
-                hypotheses, references, source
-            )
-            original_matrix = {
-                "data": pairwise_scores.tolist(),
-                "shape": pairwise_scores.shape,
-                "dtype": str(pairwise_scores.dtype)
-            }
             with timer.measure("nmf_decomposition"):
-                pairwise_scores, W, H = nmf_decomposition(
+                dec_pairwise_scores, W, H = nmf_decomposition(
                     pairwise_scores, 
                     rank=self.cfg.rank, 
                     beta=self.cfg.beta, 
                     l1_ratio=self.cfg.l1_ratio,
                     device=self.cfg.device
                 )
-                decomposed_matrix = {
-                    "data": pairwise_scores.tolist(),
-                    "shape": pairwise_scores.shape,
-                    "dtype": str(pairwise_scores.dtype)
-                }
-                W = {
-                    "data": W.tolist(),
-                    "shape": W.shape,
-                    "dtype": str(W.dtype)
-                }
-                H = {
-                    "data": H.tolist(),
-                    "shape": H.shape,
-                    "dtype": str(H.dtype)
-                }
             with timer.measure("expectation"):
                 expected_scores = functional.expectation(
-                    pairwise_scores, lprobs=reference_lprobs
+                    dec_pairwise_scores, 
+                    lprobs=reference_lprobs
                 )
-
+        
         selector_outputs = self.select(
             hypotheses, expected_scores, nbest=nbest, source=source
         )
-        return (
-            self.Output(
-                idx=selector_outputs.idx,
-                sentence=selector_outputs.sentence,
-                score=selector_outputs.score,
-                original_matrix=original_matrix,
-                decomposed_matrix=decomposed_matrix,
-                W=W,
-                H=H,
+        if self.cfg.save_components:
+            return (
+                self.Output(
+                    idx=selector_outputs.idx,
+                    sentence=selector_outputs.sentence,
+                    score=selector_outputs.score,
+                    W=W,
+                    H=H,
+                    original_matrix=pairwise_scores,
+                    decomposed_matrix=dec_pairwise_scores,
+                )
             )
-        )
+        else:
+            return (
+                self.Output(
+                    idx=selector_outputs.idx,
+                    sentence=selector_outputs.sentence,
+                    score=selector_outputs.score,
+                )
+            )

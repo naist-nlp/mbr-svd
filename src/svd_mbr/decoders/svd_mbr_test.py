@@ -112,6 +112,7 @@ class TestDecoderSvdMBR:
             DecoderSvdMBR.Config(
                 top_k_sv=top_k_sv,
                 bottom_k_sv=bottom_k_sv,
+                save_components=True,
             ),
             metric,
         )
@@ -122,18 +123,43 @@ class TestDecoderSvdMBR:
         for i, (hyps, refs) in enumerate(zip(HYPOTHESES, REFERENCES)):
             naive_output = naive_decoder.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
             output = decoder.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
-            print(naive_output.score, output.score)
-            assert output.idx == naive_output.idx
-            assert output.sentence == naive_output.sentence
-            if top_k_sv is None and bottom_k_sv is None:
+            if (top_k_sv is None or top_k_sv == 0 or top_k_sv >= len(hyps)) and (bottom_k_sv is None or bottom_k_sv == 0 or bottom_k_sv >= len(hyps)):
+                print(output.score, naive_output.score)
                 torch.testing.assert_close(
                     torch.tensor(output.score), torch.tensor(naive_output.score)
                 )
+                assert output.idx == naive_output.idx
+                assert output.sentence == naive_output.sentence
             else:
-                if (top_k_sv == 0 and bottom_k_sv == 0) or (top_k_sv >= len(hyps) and (bottom_k_sv is None or bottom_k_sv >= len(hyps))):
-                    torch.testing.assert_close(
-                        torch.tensor(output.score), torch.tensor(naive_output.score)
-                    )
-                else:
-                    assert not torch.allclose(torch.tensor(output.score), torch.tensor(naive_output.score))
-                    assert len(output.singularvals) == min(top_k_sv, len(hyps))
+                assert not torch.equal(torch.tensor(output.score), torch.tensor(naive_output.score))
+                assert len(output.singularvals) == min(max(top_k_sv or 0, top_k_sv or bottom_k_sv or 0), len(hyps))
+
+    def test_same_top_k_bot_k(self):
+        metric = MetricChrF(MetricChrF.Config())
+        decoder_top = DecoderSvdMBR(
+            DecoderSvdMBR.Config(
+                top_k_sv=5,
+                bottom_k_sv=None,
+                save_components=True,
+            ),
+            metric,
+        )
+        decoder_bot = DecoderSvdMBR(
+            DecoderSvdMBR.Config(
+                top_k_sv=None,
+                bottom_k_sv=5,
+                save_components=True,
+            ),
+            metric,
+        )
+        for i, (hyps, refs) in enumerate(zip(HYPOTHESES, REFERENCES)):
+            output_top = decoder_top.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
+            output_bot = decoder_bot.decode(hyps, refs, SOURCE[i], nbest=len(hyps))
+            print(output_top.original_matrix, output_bot.original_matrix)
+            assert torch.equal(output_top.singularvals, output_bot.singularvals), "Singular values are not equal. Got {} and {}".format(output_top.singularvals, output_bot.singularvals)
+            assert torch.equal(output_top.decomposed_matrix, output_bot.decomposed_matrix), "Decomposed matrices are not equal. Got {} and {}".format(output_top.decomposed_matrix, output_bot.decomposed_matrix)
+            assert output_top.idx == output_bot.idx, "Indices are not equal. Got {} and {}".format(output_top.idx, output_bot.idx)
+            assert output_top.sentence == output_bot.sentence, "Sentences are not equal. Got {} and {}".format(output_top.sentence, output_bot.sentence)
+            torch.testing.assert_close(
+                torch.tensor(output_top.score), torch.tensor(output_bot.score)
+            )

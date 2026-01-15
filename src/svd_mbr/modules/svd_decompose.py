@@ -31,18 +31,19 @@ def svd_decomposition(
 
     matrix = matrix.to(device)
     U, S, Vh = torch.linalg.svd(matrix, full_matrices=not is_reduced)
+    rank = S.shape[0]
     if bottom_k and top_k:
         bottom_k = None  # Ignore bottom_k if top_k is provided
     if top_k is not None:
-        top_k = min(top_k, S.shape[0])
+        top_k = min(top_k, rank)
         U = U[:, :top_k]
         S = S[:top_k]
         Vh = Vh[:top_k, :]
     elif bottom_k is not None:
-        bottom_k = min(bottom_k, S.shape[0])
-        U = U[:, -bottom_k:]
-        S = S[-bottom_k:]
-        Vh = Vh[-bottom_k:, :]
+        bottom_k = min(bottom_k, rank)
+        U = U[:, (rank-bottom_k):rank]
+        S = S[(rank-bottom_k):rank]
+        Vh = Vh[(rank-bottom_k):rank, :]
     if is_reduced:
         decomposed_matrix = (U * S) @ Vh
     else:

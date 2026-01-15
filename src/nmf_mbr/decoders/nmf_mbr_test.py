@@ -113,6 +113,7 @@ class TestDecoderNmfMBR:
                 rank=rank,
                 beta=beta,
                 l1_ratio=l1_ratio,
+                save_components=True,
             ),
             metric,
         )
@@ -130,10 +131,10 @@ class TestDecoderNmfMBR:
                 assert output.W is not None
                 assert output.H is not None
                 assert output.decomposed_matrix is not None
-                assert output.original_matrix["shape"] == output.decomposed_matrix["shape"]
-                assert torch.all(torch.tensor(output.decomposed_matrix["data"]) >= 0)
-                assert torch.all(torch.tensor(output.W["data"]) >= 0)
-                assert torch.all(torch.tensor(output.H["data"]) >= 0)
+                assert output.original_matrix.shape == output.decomposed_matrix.shape
+                assert torch.all(output.decomposed_matrix >= 0)
+                assert torch.all(output.W >= 0)
+                assert torch.all(output.H >= 0)
             else:
                 torch.testing.assert_close(
                     torch.tensor(naive_output.score),
