@@ -1,11 +1,12 @@
 import os
-from unittest import result
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from ast import literal_eval
 from argparse import ArgumentParser
 
-from vis_load_data import get_data_by_row, compile_scores
+
+from vis_load_data import compile_decodes, compile_scores, update_decode_status, get_combination_result, get_scores
 from vis_matrices import main as vis_matrices
 from vis_singularvals import main as vis_singularvals
 from vis_performance import main as vis_performance
@@ -33,28 +34,77 @@ def parse_args():
     )
     return parser.parse_args()
 
+def load_score_data(score_filename):
+    try:
+        scores_df = pd.read_csv(score_filename)
+        scores_df = scores_df.map(lambda x: literal_eval(x) if x.startswith("[") else x)
+    except:
+        scores_df = compile_scores()
+        scores_df.to_csv(score_filename, index=False)
+    return scores_df
+
+def update_data(decode_df, scores_series):
+
+    # Check for decoding results
+    print("Decode df shape before updating:", decode_df.shape)
+    condition = decode_df["decode_exist"] == True
+    result_df = decode_df.loc[condition].apply(get_combination_result, all_hyps=np.array(scores_series["hyps"].values[0]), axis=1, result_type="expand")
+    decode_df.loc[condition, result_df.columns] = result_df
+
+    print("Combination results updated.")
+
+    # Calculate the scores
+    condition = decode_df["selected_indexes"].apply(lambda x: len(x) > 0)
+    result_list = decode_df.loc[condition, "selected_indexes"].apply(get_scores, scores_series=scores_series)
+    result_df = pd.DataFrame(result_list.tolist(), index=decode_df.loc[condition].index)
+    decode_df.loc[condition, result_df.columns] = result_df
+
+    print("Scores updated.")
+
+    return decode_df
+
 def main():
     args = parse_args()
     decompose_mode = args.decompose_mode
     visualization_type = args.visualization_type
     cand_counts = args.cand_counts
 
-    try:
-        scores_df = pd.read_csv("results/20260108/compiled_scores.csv")
-        scores_df = scores_df.map(lambda x: literal_eval(x) if x.startswith("[") else x)
-    except:
-        scores_df = compile_scores(cand_counts)
-        scores_df.to_csv("results/20260108/compiled_scores.csv", index=False)
-    scores_df = scores_df.loc[scores_df["hyp_type"].isin([f"eps.{count}" for count in cand_counts])]
+    score_filename = f"results/20260108/compiled_scores.csv"
+    decompose_filename = f"results/20260306/decompose_decode_status_{decompose_mode}.csv"
 
-    decode_df = pd.read_csv("results/20260108/decompose_decode_status.csv")
-    data_df = decode_df.loc[(decode_df["decompose_mode"].isin([decompose_mode])) & 
-                            (decode_df["hyp_type"].isin([f"eps.{count}" for count in cand_counts])) & 
-                            (decode_df["ref_type"].isin([f"eps.{count}" for count in cand_counts]))].copy()
-    data_df["param"] = data_df["param"].apply(literal_eval)
-    data_df = data_df.loc[data_df["param"].apply(lambda x: x.get("is_reduced", None) == True)]
-    result_df = data_df.apply(get_data_by_row, axis=1, result_type="expand")
-    data_df[result_df.columns] = result_df
+    try:
+        decode_df = pd.read_csv(decompose_filename)
+        decode_df["param"] = decode_df["param"].map(lambda x: literal_eval(x) if isinstance(x, str) else x)
+        decode_df["selected_indexes"] = decode_df["selected_indexes"].map(lambda x: literal_eval(x) if isinstance(x, str) else x)
+    except FileNotFoundError:
+        decode_df = compile_decodes()
+        decode_df["decode_exist"] = decode_df.apply(update_decode_status, axis=1)
+        score_df = load_score_data(score_filename)
+        decode_df = update_data(decode_df, score_df)
+    else:
+        print("Entering else")
+        sub_decode_df = decode_df.loc[decode_df["decompose_mode"] == "normed_svd_mbr"].copy()
+        score_df = load_score_data(score_filename)
+        sub_decode_df = update_data(sub_decode_df, score_df)
+        decode_df.update(sub_decode_df)
+        # condition = decode_df["decode_exist"] == False
+        # if condition.sum() > 0:
+        #     decode_df.loc[condition, "decode_exist"] = decode_df.loc[condition].apply(update_decode_status, axis=1)
+        #     scores_series = load_score_data(score_filename, hyp_count)
+        #     decode_df = update_data(decode_df, scores_series)
+    finally:
+        decode_df.to_csv(decompose_filename, index=False)
+
+    print("Decode data loaded.")
+
+    
+    # data_df = decode_df.loc[(decode_df["decompose_mode"].isin([decompose_mode])) & 
+    #                         (decode_df["hyp_type"].isin([f"eps.{count}" for count in cand_counts])) & 
+    #                         (decode_df["ref_type"].isin([f"eps.{count}" for count in cand_counts]))].copy()
+    # data_df["param"] = data_df["param"].apply(literal_eval)
+    # data_df = data_df.loc[data_df["param"].apply(lambda x: x.get("is_reduced", None) == True)]
+    # result_df = data_df.apply(get_data_by_row, axis=1, result_type="expand")
+    # data_df[result_df.columns] = result_df
 
     if visualization_type == "matrices":
         filtered_data = data_df.loc[data_df["param"].apply(lambda x: x.get("top_k_sv", None) != None)]

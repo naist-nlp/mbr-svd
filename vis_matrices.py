@@ -3,22 +3,23 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 
-def _calculate_matrices_diff(decode_content):
-    original_matrices, reconstructed_matrices = [], []
-    if decode_content[0]["original_matrix"] == None:
-        return {}
-    for row_res in decode_content:
-        original_matrix = torch.tensor(row_res["original_matrix"]["data"])
-        reconstructed_matrix = torch.tensor(row_res["decomposed_matrix"]["data"])
-        original_matrices.append(original_matrix)
-        reconstructed_matrices.append(reconstructed_matrix)
-    original_matrices = torch.stack(original_matrices)
-    reconstructed_matrices = torch.stack(reconstructed_matrices)
-    diffs = original_matrices - reconstructed_matrices
-    return diffs
+def _calculate_matrix_diff(ori_mat, dec_mat):
+    return ori_mat - dec_mat
 
-def _calculate_l2_norm(tensor):
-    return torch.linalg.norm(tensor, dim=(1,2), ord='fro')
+def _calculate_l2_norm(diff_tensor):
+    return torch.linalg.norm(diff_tensor, ord='fro')
+
+def process_matrices(original_matrix, reconstructed_matrix):
+    original_matrix = torch.mean(original_matrix, dim=0)
+    reconstructed_matrix = torch.mean(reconstructed_matrix, dim=0)
+    diff = _calculate_matrix_diff(original_matrix, reconstructed_matrix)
+    error_val = _calculate_l2_norm(diff)
+    return {
+        "avg_original_matrix": original_matrix,
+        "avg_reconstructed_matrix": reconstructed_matrix,
+        "avg_diff_matrix": diff,
+        "avg_error_value": error_val
+    }
 
 def visualize_histogram(tensor, output_file):
     if len(tensor) == 0:
@@ -75,6 +76,7 @@ def visualize_diff_heatmap(tensor, output_file):
 
 def main(decode_content, output_path):
     matrices_diff = _calculate_matrices_diff(decode_content)
+    print(matrices_diff.shape)
     if not os.path.exists(os.path.join(output_path, "reconstruction_error_heatmaps.png")):
         visualize_diff_heatmap(matrices_diff, os.path.join(output_path, "reconstruction_error_heatmaps.png"))
     if not os.path.exists(os.path.join(output_path, "reconstruction_error_histogram.png")):

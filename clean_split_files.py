@@ -62,10 +62,19 @@ def run(hyp_count: int, ref_count: int):
         #         print(f"Warning: selected index {col_idx} not found in grouped indices {grouped_indices[row]} for row {row}")
         #         continue
         # print(selected_indices, type(selected_indices))
+        assert_error = False
         for row, col_idx in enumerate(selected_indices):
             expected_sentence = all_hyps[row, col_idx]
             actual_sentence = selected_sentences[row]
-            assert expected_sentence == actual_sentence, f"Validation failed at row {row}: expected '{expected_sentence}', got '{actual_sentence}'"
+            try:
+                assert expected_sentence == actual_sentence, f"Validation failed at row {row}: expected '{expected_sentence}', got '{actual_sentence}'"
+            except AssertionError as e:
+                print(e)
+                assert_error = True
+                continue
+        if assert_error:
+            print(f"Skipping file {result_file} due to validation errors.")
+            continue
         # -- Validation over --
 
         with open(os.path.join(new_result_path, result_file), "w") as f:
@@ -74,7 +83,7 @@ def run(hyp_count: int, ref_count: int):
         with open(os.path.join(new_result_path, result_file+".mbr_data"), "w") as f:
             mbr_data_df = row_data[["selected_idx", "rank", "expected_score"]].copy()
             for row in mbr_data_df.to_dict(orient="records"):
-                print(row, file=f)
+                print(json.dumps(row), file=f)
 
         for col in row_data.columns:
             if col in ["sentence", "selected_idx", "rank", "expected_score"]:
@@ -87,6 +96,8 @@ def run(hyp_count: int, ref_count: int):
 
             data_list = torch.tensor([row["data"] for row in data_list])
             torch.save(data_list, os.path.join(new_result_path, result_file+f".{col}.pt"))
+        
+        os.remove(os.path.join(result_path, result_file))
 
 def main():
     args = parse_args()
