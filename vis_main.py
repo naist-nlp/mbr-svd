@@ -6,7 +6,8 @@ from ast import literal_eval
 from argparse import ArgumentParser
 
 
-from vis_load_data import compile_decodes, compile_scores, update_decode_status, get_combination_result, get_scores
+# from vis_load_data import compile_decodes, compile_scores, update_decode_status, get_combination_result, get_scores
+from vis_load_data import compile_no_mbr_scores, compile_mbr_scores, compile_oracle_scores
 from vis_matrices import main as vis_matrices
 from vis_singularvals import main as vis_singularvals
 from vis_performance import main as vis_performance
@@ -32,70 +33,94 @@ def parse_args():
         default=[4, 8, 16, 32, 64, 128, 256, 512, 1024],
         help="List of candidate counts to consider",
     )
+    parser.add_argument(
+        "--metadata",
+        type=str,
+        help="Path to the metadata CSV file. If this exist, will use all info from this file instead of crawling the folder"
+    )
     return parser.parse_args()
 
-def load_score_data(score_filename):
-    try:
-        scores_df = pd.read_csv(score_filename)
-        scores_df = scores_df.map(lambda x: literal_eval(x) if x.startswith("[") else x)
-    except:
-        scores_df = compile_scores()
-        scores_df.to_csv(score_filename, index=False)
-    return scores_df
+# def load_score_data(score_filename):
+#     try:
+#         scores_df = pd.read_csv(score_filename)
+#         scores_df = scores_df.map(lambda x: literal_eval(x) if x.startswith("[") else x)
+#     except:
+#         scores_df = compile_scores()
+#         scores_df.to_csv(score_filename, index=False)
+#     return scores_df
 
-def update_data(decode_df, scores_series):
+# def update_data(decode_df, scores_series):
 
-    # Check for decoding results
-    print("Decode df shape before updating:", decode_df.shape)
-    condition = decode_df["decode_exist"] == True
-    result_df = decode_df.loc[condition].apply(get_combination_result, all_hyps=np.array(scores_series["hyps"].values[0]), axis=1, result_type="expand")
-    decode_df.loc[condition, result_df.columns] = result_df
+#     # Check for decoding results
+#     print("Decode df shape before updating:", decode_df.shape)
+#     condition = decode_df["decode_exist"] == True
+#     result_df = decode_df.loc[condition].apply(get_combination_result, all_hyps=np.array(scores_series["hyps"].values[0]), axis=1, result_type="expand")
+#     decode_df.loc[condition, result_df.columns] = result_df
 
-    print("Combination results updated.")
+#     print("Combination results updated.")
 
-    # Calculate the scores
-    condition = decode_df["selected_indexes"].apply(lambda x: len(x) > 0)
-    result_list = decode_df.loc[condition, "selected_indexes"].apply(get_scores, scores_series=scores_series)
-    result_df = pd.DataFrame(result_list.tolist(), index=decode_df.loc[condition].index)
-    decode_df.loc[condition, result_df.columns] = result_df
+#     # Calculate the scores
+#     condition = decode_df["selected_indexes"].apply(lambda x: len(x) > 0)
+#     result_list = decode_df.loc[condition, "selected_indexes"].apply(get_scores, scores_series=scores_series)
+#     result_df = pd.DataFrame(result_list.tolist(), index=decode_df.loc[condition].index)
+#     decode_df.loc[condition, result_df.columns] = result_df
 
-    print("Scores updated.")
+#     print("Scores updated.")
 
-    return decode_df
+#     return decode_df
 
 def main():
     args = parse_args()
     decompose_mode = args.decompose_mode
     visualization_type = args.visualization_type
     cand_counts = args.cand_counts
+    metadata_dir = args.metadata
 
-    score_filename = f"results/20260108/compiled_scores.csv"
-    decompose_filename = f"results/20260306/decompose_decode_status_{decompose_mode}.csv"
+    decompose_filename = f"results/20260317/decompose_decode_status_{decompose_mode}.csv"
 
-    try:
-        decode_df = pd.read_csv(decompose_filename)
-        decode_df["param"] = decode_df["param"].map(lambda x: literal_eval(x) if isinstance(x, str) else x)
-        decode_df["selected_indexes"] = decode_df["selected_indexes"].map(lambda x: literal_eval(x) if isinstance(x, str) else x)
-    except FileNotFoundError:
-        decode_df = compile_decodes()
-        decode_df["decode_exist"] = decode_df.apply(update_decode_status, axis=1)
-        score_df = load_score_data(score_filename)
-        decode_df = update_data(decode_df, score_df)
-    else:
-        print("Entering else")
-        sub_decode_df = decode_df.loc[decode_df["decompose_mode"] == "normed_svd_mbr"].copy()
-        score_df = load_score_data(score_filename)
-        sub_decode_df = update_data(sub_decode_df, score_df)
-        decode_df.update(sub_decode_df)
-        # condition = decode_df["decode_exist"] == False
-        # if condition.sum() > 0:
-        #     decode_df.loc[condition, "decode_exist"] = decode_df.loc[condition].apply(update_decode_status, axis=1)
-        #     scores_series = load_score_data(score_filename, hyp_count)
-        #     decode_df = update_data(decode_df, scores_series)
-    finally:
-        decode_df.to_csv(decompose_filename, index=False)
+    if metadata_dir and os.path.exists(metadata_dir):
+        print(f"Loading metadata from {metadata_dir}")
+        hyp_metadata = pd.read_csv(f"{metadata_dir}/hyp_metadata.csv")
+        score_metadata = pd.read_csv(f"{metadata_dir}/score_metadata.csv")
+        validated_metadata = pd.read_csv(f"{metadata_dir}/validated_metadata.csv")
 
-    print("Decode data loaded.")
+        hyp_metadata = hyp_metadata.loc[hyp_metadata["dataset"] == "wmt22-ende"]
+
+        validated_metadata["supporting_files"] = validated_metadata["supporting_files"].apply(literal_eval)
+        hyp_metadata["supporting_files"] = hyp_metadata["supporting_files"].apply(literal_eval)
+
+        if decompose_mode == "no_mbr":
+            results_df = compile_no_mbr_scores(hyp_metadata, score_metadata)
+        elif decompose_mode == "oracle":
+            results_df = compile_oracle_scores(hyp_metadata, score_metadata)
+        else:
+            results_df = compile_mbr_scores(hyp_metadata, score_metadata, validated_metadata, decompose_mode)
+        results_df.to_csv(decompose_filename, index=False)
+
+    # try:
+    #     decode_df = pd.read_csv(decompose_filename)
+    #     decode_df["param"] = decode_df["param"].map(lambda x: literal_eval(x) if isinstance(x, str) else x)
+    #     decode_df["selected_indexes"] = decode_df["selected_indexes"].map(lambda x: literal_eval(x) if isinstance(x, str) else x)
+    # except FileNotFoundError:
+    #     decode_df = compile_decodes()
+    #     decode_df["decode_exist"] = decode_df.apply(update_decode_status, axis=1)
+    #     score_df = load_score_data(score_filename)
+    #     decode_df = update_data(decode_df, score_df)
+    # else:
+    #     print("Entering else")
+    #     sub_decode_df = decode_df.loc[decode_df["decompose_mode"] == "normed_svd_mbr"].copy()
+    #     score_df = load_score_data(score_filename)
+    #     sub_decode_df = update_data(sub_decode_df, score_df)
+    #     decode_df.update(sub_decode_df)
+    #     # condition = decode_df["decode_exist"] == False
+    #     # if condition.sum() > 0:
+    #     #     decode_df.loc[condition, "decode_exist"] = decode_df.loc[condition].apply(update_decode_status, axis=1)
+    #     #     scores_series = load_score_data(score_filename, hyp_count)
+    #     #     decode_df = update_data(decode_df, scores_series)
+    # finally:
+    #     decode_df.to_csv(decompose_filename, index=False)
+
+    # print("Decode data loaded.")
 
     
     # data_df = decode_df.loc[(decode_df["decompose_mode"].isin([decompose_mode])) & 
