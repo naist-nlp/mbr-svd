@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import ParameterGrid
 
-from vis_matrices import process_matrices
+from vis_plots import process_matrices
 from src.svd_mbr.modules.z_score_norm import z_score_norm
 
 hyps_path = "/var/autofs/cl/home2/share/mbrs/generated_text"
@@ -122,7 +122,6 @@ def compile_mbr_scores(hyp_metadata, score_metadata, validated_metadata, mbr_typ
         scores = compile_scores(hyp_metadata, score_metadata, row.task, row.dataset, row.hyp_sampling, row.hyp_count, selected_indices)
         row_data.update(scores)
         mbr_data.append(row_data)
-        exit()
     return pd.DataFrame(mbr_data)
 
 def compile_oracle_scores(hyp_metadata, score_metadata):

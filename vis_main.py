@@ -7,12 +7,13 @@ from argparse import ArgumentParser
 
 
 # from vis_load_data import compile_decodes, compile_scores, update_decode_status, get_combination_result, get_scores
-from vis_load_data import compile_no_mbr_scores, compile_mbr_scores, compile_oracle_scores
-from vis_matrices import main as vis_matrices
-from vis_singularvals import main as vis_singularvals
-from vis_performance import main as vis_performance
- 
+from vis_load_data import (compile_no_mbr_scores, 
+                        compile_mbr_scores, 
+                        compile_oracle_scores,
+                        metrics)
+
 analysis_path = "/var/autofs/cl/home2/share/mbrs/analysis/translation"
+metadata_dir = "metadata"
 
 def parse_args():
     parser = ArgumentParser(description="Visualization for SVD analysis results")
@@ -22,9 +23,9 @@ def parse_args():
         help="Decomposition mode to analyze (e.g., svd_mbr)",
     )
     parser.add_argument(
-        "--visualization_type",
+        "--process_type",
         type=str,
-        help="Type of visualization to generate",
+        help="Type of process to run",
     )
     parser.add_argument(
         "--cand_counts",
@@ -36,7 +37,14 @@ def parse_args():
     parser.add_argument(
         "--metadata",
         type=str,
-        help="Path to the metadata CSV file. If this exist, will use all info from this file instead of crawling the folder"
+        default=metadata_dir,
+        help="Path to the metadata CSV file"
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=analysis_path,
+        help="Directory to save the generated visualizations",
     )
     return parser.parse_args()
 
@@ -72,14 +80,14 @@ def parse_args():
 def main():
     args = parse_args()
     decompose_mode = args.decompose_mode
-    visualization_type = args.visualization_type
+    process_type = args.process_type
     cand_counts = args.cand_counts
     metadata_dir = args.metadata
+    output_dir = args.output_dir
 
-    decompose_filename = f"results/20260317/decompose_decode_status_{decompose_mode}.csv"
+    decompose_filename = f"{output_dir}/decompose_decode_status_{decompose_mode}.csv"
 
-    if metadata_dir and os.path.exists(metadata_dir):
-        print(f"Loading metadata from {metadata_dir}")
+    if process_type == "prepare_data":
         hyp_metadata = pd.read_csv(f"{metadata_dir}/hyp_metadata.csv")
         score_metadata = pd.read_csv(f"{metadata_dir}/score_metadata.csv")
         validated_metadata = pd.read_csv(f"{metadata_dir}/validated_metadata.csv")
@@ -96,6 +104,30 @@ def main():
         else:
             results_df = compile_mbr_scores(hyp_metadata, score_metadata, validated_metadata, decompose_mode)
         results_df.to_csv(decompose_filename, index=False)
+    elif "vis_" in process_type:
+        no_mbr_df = pd.read_csv(f"{output_dir}/decompose_decode_status_no_mbr.csv")
+        no_mbr_df = no_mbr_df.dropna(subset=metrics)
+
+        oracle_df = pd.read_csv(f"{output_dir}/decompose_decode_status_oracle.csv")
+
+        vanilla_df = pd.read_csv(f"{output_dir}/decompose_decode_status_mbr.csv")
+
+        decomposed_df = pd.read_csv(f"{output_dir}/decompose_decode_status_{decompose_mode}.csv")
+        validated_metadata = pd.read_csv(f"{metadata_dir}/validated_metadata.csv")
+        validated_metadata.rename(columns={"decompose_mode": "method"}, inplace=True)
+
+        vanilla_df = pd.merge(vanilla_df, validated_metadata.loc[validated_metadata["method"] == "mbr"], 
+            left_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function"], 
+            right_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function"], 
+            how="inner")
+
+        decomposed_df = pd.merge(decomposed_df, validated_metadata.loc[validated_metadata["method"] == "normed_svd_mbr"], 
+            left_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function", "params"], 
+            right_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function", "params"], 
+            how="inner")
+
+        decomposed_df["supporting_files"] = decomposed_df["supporting_files"].apply(literal_eval)
+        vanilla_df["supporting_files"] = vanilla_df["supporting_files"].apply(literal_eval)
 
     # try:
     #     decode_df = pd.read_csv(decompose_filename)
@@ -131,49 +163,49 @@ def main():
     # result_df = data_df.apply(get_data_by_row, axis=1, result_type="expand")
     # data_df[result_df.columns] = result_df
 
-    if visualization_type == "matrices":
-        filtered_data = data_df.loc[data_df["param"].apply(lambda x: x.get("top_k_sv", None) != None)]
-        for idx, row in tqdm(filtered_data.iterrows(), total=filtered_data.shape[0], desc="Matrices Visualization"):
-            if row["param"]:
-                file_name = f'{row["hyp_type"]}-{row["ref_type"]}.params-{"-".join([f"{k}-{v}" for k, v in row["param"].items()])}'
-            else:
-                file_name = f'{row["hyp_type"]}-{row["ref_type"]}'
-            output_path = f"{analysis_path}/{decompose_mode}/matrices/{file_name}"
-            os.makedirs(output_path, exist_ok=True)
-            vis_matrices(row["decode_content"], output_path)
-    elif visualization_type == "singularvals":
-        filtered_data = data_df.loc[data_df["param"].apply(lambda x: x.get("top_k_sv", None) == 0)]
-        for idx, row in tqdm(filtered_data.iterrows(), total=filtered_data.shape[0], desc="Singular Values Visualization"):
-            if row["param"]:
-                file_name = f'{row["hyp_type"]}-{row["ref_type"]}.params-{"-".join([f"{k}-{v}" for k, v in row["param"].items()])}'
-            else:
-                file_name = f'{row["hyp_type"]}-{row["ref_type"]}'
-            output_path = f"{analysis_path}/{decompose_mode}/singularvals/{file_name}"
-            os.makedirs(output_path, exist_ok=True)
-            vis_singularvals(row["decode_content"], min(int(row["hyp_type"].split(".")[-1]), int(row["ref_type"].split(".")[-1])), output_path)
-    elif visualization_type == "performance":
-        for hyp_cnt in cand_counts:
-            filtered_scores = scores_df.loc[scores_df["hyp_type"] == f"eps.{hyp_cnt}"].iloc[0]
-            comparer_indexes = scores_df.loc[scores_df["hyp_type"] == f"eps.{hyp_cnt}", ["lprobs_idx", "bleu_oracle_idx", "chrf_oracle_idx", "comet_oracle_idx", "bleurt_oracle_idx", "cometkiwi_oracle_idx"]].rename(columns={
-                "lprobs_idx": "lprobs",
-                "bleu_oracle_idx": "bleu_oracle",
-                "chrf_oracle_idx": "chrf_oracle",
-                "comet_oracle_idx": "comet_oracle",
-                "bleurt_oracle_idx": "bleurt_oracle",
-                "cometkiwi_oracle_idx": "cometkiwi_oracle"
-            }).to_dict(orient="records")[0]
-            for ref_cnt in cand_counts:
-                if decompose_mode == "normed_svd_mbr":
-                    for norm_dim in [None, 0, 1]:
-                        filtered_data = data_df.loc[(data_df["hyp_type"] == f"eps.{hyp_cnt}") & (data_df["ref_type"] == f"eps.{ref_cnt}") & (data_df["param"].apply(lambda x: x.get("norm_dim", None) == norm_dim))]
-                        output_path = f"{analysis_path}/{decompose_mode}/performance/eps.{hyp_cnt}-eps.{ref_cnt}-norm_dim_{norm_dim}"
-                        os.makedirs(output_path, exist_ok=True)
-                        vis_performance(filtered_data[["param", "decode_content"]], filtered_scores, comparer_indexes, output_path)
-                else:                    
-                    filtered_data = data_df.loc[(data_df["hyp_type"] == f"eps.{hyp_cnt}") & (data_df["ref_type"] == f"eps.{ref_cnt}")]
-                    output_path = f"{analysis_path}/{decompose_mode}/performance/eps.{hyp_cnt}-eps.{ref_cnt}"
-                    os.makedirs(output_path, exist_ok=True)
-                    vis_performance(filtered_data[["param", "decode_content"]], filtered_scores, comparer_indexes, output_path)
+    # if visualization_type == "matrices":
+    #     filtered_data = data_df.loc[data_df["param"].apply(lambda x: x.get("top_k_sv", None) != None)]
+    #     for idx, row in tqdm(filtered_data.iterrows(), total=filtered_data.shape[0], desc="Matrices Visualization"):
+    #         if row["param"]:
+    #             file_name = f'{row["hyp_type"]}-{row["ref_type"]}.params-{"-".join([f"{k}-{v}" for k, v in row["param"].items()])}'
+    #         else:
+    #             file_name = f'{row["hyp_type"]}-{row["ref_type"]}'
+    #         output_path = f"{analysis_path}/{decompose_mode}/matrices/{file_name}"
+    #         os.makedirs(output_path, exist_ok=True)
+    #         vis_matrices(row["decode_content"], output_path)
+    # elif visualization_type == "singularvals":
+    #     filtered_data = data_df.loc[data_df["param"].apply(lambda x: x.get("top_k_sv", None) == 0)]
+    #     for idx, row in tqdm(filtered_data.iterrows(), total=filtered_data.shape[0], desc="Singular Values Visualization"):
+    #         if row["param"]:
+    #             file_name = f'{row["hyp_type"]}-{row["ref_type"]}.params-{"-".join([f"{k}-{v}" for k, v in row["param"].items()])}'
+    #         else:
+    #             file_name = f'{row["hyp_type"]}-{row["ref_type"]}'
+    #         output_path = f"{analysis_path}/{decompose_mode}/singularvals/{file_name}"
+    #         os.makedirs(output_path, exist_ok=True)
+    #         vis_singularvals(row["decode_content"], min(int(row["hyp_type"].split(".")[-1]), int(row["ref_type"].split(".")[-1])), output_path)
+    # elif visualization_type == "performance":
+    #     for hyp_cnt in cand_counts:
+    #         filtered_scores = scores_df.loc[scores_df["hyp_type"] == f"eps.{hyp_cnt}"].iloc[0]
+    #         comparer_indexes = scores_df.loc[scores_df["hyp_type"] == f"eps.{hyp_cnt}", ["lprobs_idx", "bleu_oracle_idx", "chrf_oracle_idx", "comet_oracle_idx", "bleurt_oracle_idx", "cometkiwi_oracle_idx"]].rename(columns={
+    #             "lprobs_idx": "lprobs",
+    #             "bleu_oracle_idx": "bleu_oracle",
+    #             "chrf_oracle_idx": "chrf_oracle",
+    #             "comet_oracle_idx": "comet_oracle",
+    #             "bleurt_oracle_idx": "bleurt_oracle",
+    #             "cometkiwi_oracle_idx": "cometkiwi_oracle"
+    #         }).to_dict(orient="records")[0]
+    #         for ref_cnt in cand_counts:
+    #             if decompose_mode == "normed_svd_mbr":
+    #                 for norm_dim in [None, 0, 1]:
+    #                     filtered_data = data_df.loc[(data_df["hyp_type"] == f"eps.{hyp_cnt}") & (data_df["ref_type"] == f"eps.{ref_cnt}") & (data_df["param"].apply(lambda x: x.get("norm_dim", None) == norm_dim))]
+    #                     output_path = f"{analysis_path}/{decompose_mode}/performance/eps.{hyp_cnt}-eps.{ref_cnt}-norm_dim_{norm_dim}"
+    #                     os.makedirs(output_path, exist_ok=True)
+    #                     vis_performance(filtered_data[["param", "decode_content"]], filtered_scores, comparer_indexes, output_path)
+    #             else:                    
+    #                 filtered_data = data_df.loc[(data_df["hyp_type"] == f"eps.{hyp_cnt}") & (data_df["ref_type"] == f"eps.{ref_cnt}")]
+    #                 output_path = f"{analysis_path}/{decompose_mode}/performance/eps.{hyp_cnt}-eps.{ref_cnt}"
+    #                 os.makedirs(output_path, exist_ok=True)
+    #                 vis_performance(filtered_data[["param", "decode_content"]], filtered_scores, comparer_indexes, output_path)
 
 
 
