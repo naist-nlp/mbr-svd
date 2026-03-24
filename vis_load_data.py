@@ -1,20 +1,17 @@
-import os
 import json
 import torch
 from tqdm import tqdm
-from ast import literal_eval
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import ParameterGrid
 
-from vis_plots import process_matrices
-from src.svd_mbr.modules.z_score_norm import z_score_norm
 
 hyps_path = "/var/autofs/cl/home2/share/mbrs/generated_text"
 result_path = "/var/autofs/cl/home2/share/mbrs/results"
 score_path = "/var/autofs/cl/home2/share/mbrs/scores"
 validated_path = "/var/autofs/cl/home2/share/mbrs/validated"
-metrics = ["bleu", "chrf", "comet", "bleurt", "cometkiwi"]
+# analysis_path = "/var/autofs/cl/home2/share/mbrs/analysis"
+translation_metrics = ["bleu", "chrf", "comet", "bleurt", "cometkiwi"]
+summarization_metrics = ["bertscore"]
 mode_types = ["mbr","svd_mbr", "normed_svd_mbr", "nmf_mbr"]
 decoding_types = ["eps", "topp", "ancestral"]
 cand_counts = [4, 8, 16, 32, 64, 128, 256, 512, 1024]

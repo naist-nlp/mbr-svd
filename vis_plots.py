@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import pandas as pd
+import numpy as np
+from tqdm import tqdm
+
+from vis_load_data import validated_path, translation_metrics, summarization_metrics
 
 def _calculate_matrix_diff(ori_mat, dec_mat):
     return ori_mat - dec_mat
@@ -27,7 +31,12 @@ def process_matrices(original_matrix, reconstructed_matrix, norm_dim: int | None
     error_val = _calculate_l2_norm(diff)
     return error_val, reconstructed_matrix
 
-def generate_eval_fig(metric_name, decomposed_data, vanilla_score, no_mbr_score, oracle_score):
+def save_figure(fig, output_file, output_ext="png"):
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    fig.savefig(f"{output_file}.{output_ext}", format=output_ext, bbox_inches='tight')
+    plt.close(fig)
+
+def generate_eval_fig(metric_name, decomposed_data, vanilla_score, no_mbr_score, oracle_score, output_dir=""):
     """
     Generate a single fig image that contains the performance visualization with the avg_l2_norm line plot 
     on the secondary y-axis, and the horizontal lines for vanilla, no MBR, and oracle scores on the primary y-axis. 
@@ -36,17 +45,17 @@ def generate_eval_fig(metric_name, decomposed_data, vanilla_score, no_mbr_score,
     fig, ax = plt.subplots(figsize=(12, 6))
 
     # Prepare categorical x-axis
-    numeric_sort = sorted(pd.to_numeric(decomposed_data['top_k_sv'].unique()))
+    numeric_sort = sorted(pd.to_numeric(decomposed_data['top_k'].unique()))
     str_categories = [str(x) for x in numeric_sort]
-    decomposed_data['top_k_sv'] = pd.Categorical(
-        decomposed_data['top_k_sv'].astype(str), 
+    decomposed_data['top_k'] = pd.Categorical(
+        decomposed_data['top_k'].astype(str), 
         categories=str_categories, 
         ordered=True
     )
 
     # --- PRIMARY AXIS (Blue) ---
     blue_color = 'tab:blue'
-    sns.lineplot(x=decomposed_data["top_k_sv"], y=decomposed_data[metric_name], 
+    sns.lineplot(x=decomposed_data["top_k"], y=decomposed_data[metric_name], 
                 marker="o", color=blue_color, label=f"{metric_name} score", ax=ax)
     
     # Style the left axis
@@ -68,7 +77,7 @@ def generate_eval_fig(metric_name, decomposed_data, vanilla_score, no_mbr_score,
     # --- SECONDARY AXIS (Red) ---
     ax2 = ax.twinx()
     red_color = 'tab:red'
-    sns.lineplot(x=decomposed_data["top_k_sv"], y=decomposed_data["avg_l2_norm"], 
+    sns.lineplot(x=decomposed_data["top_k"], y=decomposed_data["avg_l2_norm"], 
                 marker="x", linestyle="--", mec='red', color=red_color, label="Singular Value", ax=ax2)
     
     # Style the right axis
@@ -95,9 +104,9 @@ def generate_eval_fig(metric_name, decomposed_data, vanilla_score, no_mbr_score,
     plt.tight_layout()
     plt.subplots_adjust(right=0.75) 
     
-    return fig
+    save_figure(fig, f"{output_dir}-{metric_name}_eval_plot")
 
-def generate_heatmap_matrices(tensor_list, title_list, main_title="MBR Matrices Drift by Top-K"):
+def generate_heatmap_matrices(tensor_list, title_list, output_dir="", main_title="MBR Matrices Drift by Top-K"):
     """
     Generates heatmaps from a list of tensors, wrapping after 3 plots per row.
     Dynamically hides annotations and ticks if matrix dimensions exceed 16x16.
@@ -175,9 +184,9 @@ def generate_heatmap_matrices(tensor_list, title_list, main_title="MBR Matrices 
     # Adjust layout
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     
-    return fig
+    save_figure(fig, f"{output_dir}-heatmap_matrices")
 
-def generate_param_effect_fig(df, param_name, metric_name="comet"):
+def generate_param_effect_fig(df, param_name, metric_name="comet", output_dir=""):
     """
     Visualizes the effect of a specific parameter (e.g., 'beta' or 'l1_ratio')
     isolated strictly to rank 1 and rank 2.
@@ -193,7 +202,7 @@ def generate_param_effect_fig(df, param_name, metric_name="comet"):
     df_plot[param_name] = df_plot['params'].apply(parse_param)
 
     # Safely look for either 'rank' (NMF) or 'top_k_sv' (SVD) keys
-    df_plot['rank_val'] = df_plot['rank'] if "nmf" in df_plot["method"].unique()[0] else df_plot["top_k_sv"]
+    df_plot['rank_val'] = df_plot['top_k']
     
     # Drop rows missing the parameter or the rank entirely
     df_plot = df_plot.dropna(subset=[param_name, 'rank_val'])
@@ -242,7 +251,8 @@ def generate_param_effect_fig(df, param_name, metric_name="comet"):
 
     # Adjust layout and display
     plt.tight_layout()
-    return fig
+    
+    save_figure(fig, f"{output_dir}-{param_name}_effect_plot")
 
 # def _calculate_matrix_diff(ori_mat, dec_mat):
 #     return ori_mat - dec_mat
@@ -315,10 +325,85 @@ def generate_param_effect_fig(df, param_name, metric_name="comet"):
 #     plt.savefig(output_file.replace(".png", "_signed.png"))
 #     plt.close()
 
-# def main(decode_content, output_path):
-#     matrices_diff = _calculate_matrices_diff(decode_content)
-#     print(matrices_diff.shape)
-#     if not os.path.exists(os.path.join(output_path, "reconstruction_error_heatmaps.png")):
-#         visualize_diff_heatmap(matrices_diff, os.path.join(output_path, "reconstruction_error_heatmaps.png"))
-#     if not os.path.exists(os.path.join(output_path, "reconstruction_error_histogram.png")):
-#         visualize_histogram(matrices_diff, os.path.join(output_path, "reconstruction_error_histogram.png"))
+def main(decomposed_df, vanilla_df, no_mbr_df, oracle_df, output_dir=""):
+    if "nmf" in decomposed_df["method"].unique()[0]:
+        decomposed_df["top_k"] = decomposed_df["params"].apply(lambda x: int(x.split("rank-")[-1].split("-")[0]))
+    else:
+        decomposed_df["top_k"] = decomposed_df["params"].apply(lambda x: int(x.split("top_k_sv-")[-1].split("-")[0]))
+
+    checking_cols = ["task", "dataset", "hyp_sampling", "hyp_count", 
+                    "ref_sampling", "ref_count", "method", "util_function"]
+    unique_combination = decomposed_df[checking_cols].drop_duplicates()
+
+    for idx, comb_row in tqdm(unique_combination.iterrows(), total=unique_combination.shape[0], desc="Processing unique combinations"):
+        if comb_row["task"] == "translation":
+            metrics = translation_metrics
+        else:
+            metrics = summarization_metrics
+
+        match_mask = np.all(decomposed_df[checking_cols] == comb_row, axis=1)
+        filtered_df = decomposed_df.loc[match_mask].copy()
+        filtered_df = filtered_df.sort_values(by="top_k")
+
+        vanilla_col = [col for col in checking_cols if col not in ["method"]]
+        vanilla_mask = np.all(vanilla_df[vanilla_col] == comb_row[vanilla_col], axis=1)
+        vanilla_scores = vanilla_df.loc[vanilla_mask, metrics]
+        vanilla_support_files = vanilla_df.loc[vanilla_mask, "supporting_files"].values[0]
+
+        baseline_col = ["task", "dataset", "hyp_sampling", "hyp_count"]
+        no_mbr_mask = np.all(no_mbr_df[baseline_col] == comb_row[baseline_col], axis=1)
+        no_mbr_scores = no_mbr_df.loc[no_mbr_mask, metrics]
+
+        oracle_mask = np.all(oracle_df[baseline_col] == comb_row[baseline_col], axis=1)
+        oracle_scores = oracle_df.loc[oracle_mask, metrics+["method"]]
+        
+        avg_l2_norms, matrices_list = [], []
+        original_matrix = torch.load(f"{validated_path}/{comb_row['task']}/{vanilla_support_files['original_matrix.pt']}")
+        for row in filtered_df.itertuples():
+            decomposed_matrix = torch.load(f"{validated_path}/{row.task}/{row.supporting_files['decomposed_matrix.pt']}")
+
+            if "normed" not in row.method:
+                norm_dim = -1
+            else:
+                norm_dim = row.params.split("norm_dim-")[-1].split("-")[0]
+                if norm_dim == "None":
+                    norm_dim = None
+                else:
+                    norm_dim = int(norm_dim)
+            
+            if len(avg_l2_norms) == 0:  # Modify the original matrix as a baseline only for the first iteration
+                original_matrix = _normalize_zscore(original_matrix, dim=norm_dim) if norm_dim != -1 else original_matrix
+                temp_diff, temp_mat = process_matrices(original_matrix, original_matrix, norm_dim=norm_dim)
+                avg_l2_norms.append(temp_diff)
+                matrices_list.append(temp_mat)
+            temp_diff, temp_mat = process_matrices(original_matrix, decomposed_matrix, norm_dim=norm_dim)
+            avg_l2_norms.append(temp_diff)
+            matrices_list.append(temp_mat)
+
+        filtered_df["avg_l2_norm"] = avg_l2_norms[1:]
+
+        analysis_filename = f"{output_dir}/{'-'.join(map(str, pd.Series(list(row), index=row._fields)[checking_cols].values))}"
+        generate_heatmap_matrices(matrices_list, title_list=[f"Top-{row.top_k}"]*len(matrices_list), 
+                        main_title=f"{row.method} - {row.util_function} - Matrices Drift by Top-K",
+                        output_dir=analysis_filename)
+
+        if "normed_svd" in row.method:
+            generate_param_effect_fig(filtered_df, "is_reduced", metric_name=row.util_function, output_dir=analysis_filename)
+            generate_param_effect_fig(filtered_df, "norm_dim", metric_name=row.util_function, output_dir=analysis_filename)
+
+            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("is_reduced-True-norm_dim-None")]
+        elif "svd" in row.method:
+            generate_param_effect_fig(filtered_df, "is_reduced", metric_name=row.util_function, output_dir=analysis_filename)
+
+            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("is_reduced-True")]
+        elif "nmf" in row.method:
+            generate_param_effect_fig(filtered_df, "beta", metric_name=row.util_function, output_dir=analysis_filename)
+            generate_param_effect_fig(filtered_df, "l1_ratio", metric_name=row.util_function, output_dir=analysis_filename)
+
+            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("beta-0.0-l1_ratio-0.0")]
+
+        for metric_name in metrics:
+            vanilla_score = vanilla_scores[metric_name].values[0] if metric_name in vanilla_scores else 0.0
+            no_mbr_score = no_mbr_scores[metric_name].values[0] if metric_name in no_mbr_scores else 0.0
+            oracle_score = oracle_scores.loc[oracle_scores["method"] == f"oracle_{metric_name}"][metric_name].values[0] if metric_name in oracle_scores else 0.0
+            generate_eval_fig(metric_name, filtered_df, vanilla_score, no_mbr_score, oracle_score, output_dir=analysis_filename)

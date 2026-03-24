@@ -9,10 +9,10 @@ from argparse import ArgumentParser
 # from vis_load_data import compile_decodes, compile_scores, update_decode_status, get_combination_result, get_scores
 from vis_load_data import (compile_no_mbr_scores, 
                         compile_mbr_scores, 
-                        compile_oracle_scores,
-                        metrics)
+                        compile_oracle_scores)
 
-analysis_path = "/var/autofs/cl/home2/share/mbrs/analysis/translation"
+from vis_plots import main as visualize_plots
+
 metadata_dir = "metadata"
 
 def parse_args():
@@ -43,7 +43,6 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default=analysis_path,
         help="Directory to save the generated visualizations",
     )
     return parser.parse_args()
@@ -104,10 +103,9 @@ def main():
         else:
             results_df = compile_mbr_scores(hyp_metadata, score_metadata, validated_metadata, decompose_mode)
         results_df.to_csv(decompose_filename, index=False)
-    elif "vis_" in process_type:
+    elif process_type == "visualize":
         no_mbr_df = pd.read_csv(f"{output_dir}/decompose_decode_status_no_mbr.csv")
-        no_mbr_df = no_mbr_df.dropna(subset=metrics)
-
+        
         oracle_df = pd.read_csv(f"{output_dir}/decompose_decode_status_oracle.csv")
 
         vanilla_df = pd.read_csv(f"{output_dir}/decompose_decode_status_mbr.csv")
@@ -121,13 +119,15 @@ def main():
             right_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function"], 
             how="inner")
 
-        decomposed_df = pd.merge(decomposed_df, validated_metadata.loc[validated_metadata["method"] == "normed_svd_mbr"], 
+        decomposed_df = pd.merge(decomposed_df, validated_metadata.loc[validated_metadata["method"] == decompose_mode], 
             left_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function", "params"], 
             right_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function", "params"], 
             how="inner")
 
         decomposed_df["supporting_files"] = decomposed_df["supporting_files"].apply(literal_eval)
         vanilla_df["supporting_files"] = vanilla_df["supporting_files"].apply(literal_eval)
+
+        visualize_plots(decomposed_df, vanilla_df, no_mbr_df, oracle_df, output_dir=output_dir)
 
     # try:
     #     decode_df = pd.read_csv(decompose_filename)
