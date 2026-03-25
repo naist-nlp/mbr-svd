@@ -124,6 +124,8 @@ def main():
             right_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function", "params"], 
             how="inner")
 
+        decomposed_df = decomposed_df.loc[decomposed_df["hyp_count"].isin([64])]
+
         decomposed_df["supporting_files"] = decomposed_df["supporting_files"].apply(literal_eval)
         vanilla_df["supporting_files"] = vanilla_df["supporting_files"].apply(literal_eval)
 

@@ -195,7 +195,11 @@ def generate_param_effect_fig(df, param_name, metric_name="comet", output_dir=""
     
     # 1. Helper function to safely parse the param string
     def parse_param(text):
-        return text.split(f"{param_name}-")[-1].split("-")[0]
+        res_text = text.split(f"{param_name}-")[-1].split("-")
+        if res_text[0] == "":
+            return f'-{text.split(f"{param_name}-")[-1].split("-")[1]}' #Handle negative values (e.g., beta--1.0-l1_ratio-0.5)
+        else:
+            return res_text[0]
         
     # Work on a copy of the dataframe
     df_plot = df.copy()
@@ -357,7 +361,7 @@ def main(decomposed_df, vanilla_df, no_mbr_df, oracle_df, output_dir=""):
         oracle_mask = np.all(oracle_df[baseline_col] == comb_row[baseline_col], axis=1)
         oracle_scores = oracle_df.loc[oracle_mask, metrics+["method"]]
         
-        avg_l2_norms, matrices_list = [], []
+        avg_l2_norms, matrices_list, heatmap_title_list = [], [], []
         original_matrix = torch.load(f"{validated_path}/{comb_row['task']}/{vanilla_support_files['original_matrix.pt']}")
         for row in filtered_df.itertuples():
             decomposed_matrix = torch.load(f"{validated_path}/{row.task}/{row.supporting_files['decomposed_matrix.pt']}")
@@ -376,31 +380,36 @@ def main(decomposed_df, vanilla_df, no_mbr_df, oracle_df, output_dir=""):
                 temp_diff, temp_mat = process_matrices(original_matrix, original_matrix, norm_dim=norm_dim)
                 avg_l2_norms.append(temp_diff)
                 matrices_list.append(temp_mat)
+                heatmap_title_list.append("Original Matrix")
             temp_diff, temp_mat = process_matrices(original_matrix, decomposed_matrix, norm_dim=norm_dim)
             avg_l2_norms.append(temp_diff)
             matrices_list.append(temp_mat)
+            heatmap_title_list.append(f"Top-{row.top_k}")
 
         filtered_df["avg_l2_norm"] = avg_l2_norms[1:]
+        filtered_df["matrices"] = matrices_list[1:]
+        filtered_df["heatmap_title"] = heatmap_title_list[1:]
 
-        analysis_filename = f"{output_dir}/{'-'.join(map(str, pd.Series(list(row), index=row._fields)[checking_cols].values))}"
-        generate_heatmap_matrices(matrices_list, title_list=[f"Top-{row.top_k}"]*len(matrices_list), 
-                        main_title=f"{row.method} - {row.util_function} - Matrices Drift by Top-K",
-                        output_dir=analysis_filename)
+        analysis_filename = f"{output_dir}/{'-'.join(map(str, comb_row[checking_cols].values))}"
 
-        if "normed_svd" in row.method:
-            generate_param_effect_fig(filtered_df, "is_reduced", metric_name=row.util_function, output_dir=analysis_filename)
-            generate_param_effect_fig(filtered_df, "norm_dim", metric_name=row.util_function, output_dir=analysis_filename)
+        if "normed_svd" in comb_row['method']:
+            generate_param_effect_fig(filtered_df, "is_reduced", metric_name=comb_row['util_function'], output_dir=analysis_filename)
+            generate_param_effect_fig(filtered_df, "norm_dim", metric_name=comb_row['util_function'], output_dir=analysis_filename)
 
-            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("is_reduced-True-norm_dim-None")]
-        elif "svd" in row.method:
-            generate_param_effect_fig(filtered_df, "is_reduced", metric_name=row.util_function, output_dir=analysis_filename)
+            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("is_reduced-True-norm_dim-0")]
+        elif "svd" in comb_row['method']:
+            generate_param_effect_fig(filtered_df, "is_reduced", metric_name=comb_row['util_function'], output_dir=analysis_filename)
 
             filtered_df = filtered_df.loc[filtered_df["params"].str.contains("is_reduced-True")]
-        elif "nmf" in row.method:
-            generate_param_effect_fig(filtered_df, "beta", metric_name=row.util_function, output_dir=analysis_filename)
-            generate_param_effect_fig(filtered_df, "l1_ratio", metric_name=row.util_function, output_dir=analysis_filename)
+        elif "nmf" in comb_row['method']:
+            generate_param_effect_fig(filtered_df, "beta", metric_name=comb_row['util_function'], output_dir=analysis_filename)
+            generate_param_effect_fig(filtered_df, "l1_ratio", metric_name=comb_row['util_function'], output_dir=analysis_filename)
 
-            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("beta-0.0-l1_ratio-0.0")]
+            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("beta-1.0-l1_ratio-0.0")]
+        
+        generate_heatmap_matrices([matrices_list[0]]+filtered_df["matrices"].tolist(), title_list=[heatmap_title_list[0]]+filtered_df["heatmap_title"].tolist(), 
+            main_title=f"{comb_row['method']} - {comb_row['util_function']} - Matrices Drift by Top-K",
+            output_dir=analysis_filename)
 
         for metric_name in metrics:
             vanilla_score = vanilla_scores[metric_name].values[0] if metric_name in vanilla_scores else 0.0
