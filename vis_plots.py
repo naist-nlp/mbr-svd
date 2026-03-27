@@ -36,11 +36,80 @@ def save_figure(fig, output_file, output_ext="png"):
     fig.savefig(f"{output_file}.{output_ext}", format=output_ext, bbox_inches='tight')
     plt.close(fig)
 
-def generate_eval_fig(metric_name, decomposed_data, vanilla_score, no_mbr_score, oracle_score, output_dir=""):
+
+def generate_performance_fig(metrics, decomposed_data, vanilla_scores, no_mbr_scores, oracle_scores, output_dir=""):
+    """
+    Generate a single fig image that contains the performance visualization of all metrics
+    based on the top-k, but add horizontal lines
+    for baselines.
+    """
+    nlim = 3
+    nrows = len(metrics) // nlim + (1 if len(metrics) % nlim > 0 else 0)
+    ncols = min(len(metrics), nlim)
+    fig, axes = plt.subplots(figsize=(24, 10), nrows=nrows, ncols=ncols)
+
+    # Prepare categorical x-axis
+    numeric_sort = sorted(pd.to_numeric(decomposed_data['top_k'].unique()))
+    str_categories = [str(x) for x in numeric_sort]
+    decomposed_data['top_k'] = pd.Categorical(
+        decomposed_data['top_k'].astype(str), 
+        categories=str_categories, 
+        ordered=True
+    )
+
+    shared_lines, shared_labels = [], []
+    for metric_name, ax in zip(metrics, axes.flatten()):
+        # --- PRIMARY AXIS (Blue) ---
+        blue_color = 'tab:blue'
+        sns.lineplot(x=decomposed_data["top_k"], y=decomposed_data[metric_name], 
+                    marker="o", color=blue_color, label=f"Score", ax=ax)
+        
+        # Style the left axis
+        ax.set_ylabel(metric_name, color=blue_color, fontweight='bold')
+        ax.tick_params(axis='y', labelcolor=blue_color)
+        ax.spines['left'].set_color(blue_color)
+
+        # Add horizontal lines and right-side text
+        def add_h_line(y_val, color, label_text):
+            line = ax.axhline(y=y_val, color=color, linestyle="-.", label=label_text)
+            ax.text(1.01, y_val, f"{y_val:.2f}", 
+                    color=color, va='center', transform=ax.get_yaxis_transform())
+            return line
+
+        add_h_line(vanilla_scores[metric_name].values[0] if metric_name in vanilla_scores else 0.0, "orange", "Vanilla MBR")
+        add_h_line(no_mbr_scores[metric_name].values[0] if metric_name in no_mbr_scores else 0.0, "green", "No MBR")
+        add_h_line(oracle_scores[metric_name].values[0] if not oracle_scores.empty else 0.0, "grey", "Oracle")
+
+        # --- COMBINED LEGEND OUTSIDE ---
+        lines, labels = ax.get_legend_handles_labels()
+        ax.legend().remove()  # Remove the default legend from this subplot since we'll create a shared one outside
+        
+        # bbox_to_anchor=(1.15, 1) moves the legend to the right and top
+        shared_lines.extend(lines)
+        shared_labels.extend(labels)
+        ax.set_xlabel("Top-k")
+        ax.set_title(metric_name)
+
+    # Remove empty subplots if metrics < nrows*ncols
+    for i in range(len(metrics), nrows * ncols):
+        fig.delaxes(axes.flatten()[i])
+
+    axes[0][0].legend(list(set(shared_lines)), list(set(shared_labels)), 
+        loc='upper left', bbox_to_anchor=(1.05, 1.0))
+
+    fig.suptitle(f"Performance Comparison Across Metrics")
+    
+    # Adjust layout: We need extra room on the right for both labels AND legend
+    plt.tight_layout()
+    plt.subplots_adjust(right=0.75)
+        
+    save_figure(fig, f"{output_dir}-metrics_perf_compare")
+
+
+def generate_eval_fig(metric_name, decomposed_data, output_dir=""):
     """
     Generate a single fig image that contains the performance visualization with the avg_l2_norm line plot 
-    on the secondary y-axis, and the horizontal lines for vanilla, no MBR, and oracle scores on the primary y-axis. 
-    The legend is placed outside the plot area to the right.
+    on the secondary y-axis. The legend is placed outside the plot area to the right.
     """
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -54,6 +123,7 @@ def generate_eval_fig(metric_name, decomposed_data, vanilla_score, no_mbr_score,
     )
 
     # --- PRIMARY AXIS (Blue) ---
+    score_min, score_max = decomposed_data[metric_name].min(), decomposed_data[metric_name].max()
     blue_color = 'tab:blue'
     sns.lineplot(x=decomposed_data["top_k"], y=decomposed_data[metric_name], 
                 marker="o", color=blue_color, label=f"{metric_name} score", ax=ax)
@@ -63,16 +133,7 @@ def generate_eval_fig(metric_name, decomposed_data, vanilla_score, no_mbr_score,
     ax.tick_params(axis='y', labelcolor=blue_color)
     ax.spines['left'].set_color(blue_color)
 
-    # Add horizontal lines and right-side text
-    def add_h_line(y_val, color, label_text):
-        line = ax.axhline(y=y_val, color=color, linestyle="-.", label=label_text)
-        ax.text(1.01, y_val, f"{y_val:.2f}", 
-                color=color, va='center', transform=ax.get_yaxis_transform())
-        return line
-
-    add_h_line(vanilla_score, "orange", "Vanilla MBR")
-    add_h_line(no_mbr_score, "green", "No MBR")
-    add_h_line(oracle_score, "grey", "Oracle")
+    ax.set_ylim(bottom=score_min * 0.99, top=score_max * 1.01)  # Add some padding to y-limits
 
     # --- SECONDARY AXIS (Red) ---
     ax2 = ax.twinx()
@@ -174,8 +235,8 @@ def generate_heatmap_matrices(tensor_list, title_list, output_dir="", main_title
         
         # Set titles and labels
         ax.set_title(title, fontsize=12)
-        ax.set_xlabel("Hypothesis")
-        ax.set_ylabel("Pseudo-Ref")
+        ax.set_xlabel("Pseudo-Ref")
+        ax.set_ylabel("Hypothesis")
         
         # If we hid the text labels, also turn off the tiny tick line marks for a clean look
         if hide_details:
@@ -229,6 +290,8 @@ def generate_param_effect_fig(df, param_name, metric_name="comet", output_dir=""
     # Convert rank_val to a string so Seaborn treats it as a distinct category for colors
     df_plot['rank_val'] = "Rank " + df_plot['rank_val'].astype(str)
 
+    df_plot = df_plot.sort_values(by=[param_name, 'rank_val'])
+
     # 4. Set up the figure (1 row, 2 columns)
     fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(14, 5))
     fig.suptitle(f"Effect of '{param_name}' (Isolated to Rank 1 & 2)", fontsize=16, fontweight='bold')
@@ -257,77 +320,6 @@ def generate_param_effect_fig(df, param_name, metric_name="comet", output_dir=""
     plt.tight_layout()
     
     save_figure(fig, f"{output_dir}-{param_name}_effect_plot")
-
-# def _calculate_matrix_diff(ori_mat, dec_mat):
-#     return ori_mat - dec_mat
-
-# def _calculate_l2_norm(diff_tensor):
-#     return torch.linalg.norm(diff_tensor, ord='fro')
-
-# def process_matrices(original_matrix, reconstructed_matrix):
-#     original_matrix = torch.mean(original_matrix, dim=0)
-#     reconstructed_matrix = torch.mean(reconstructed_matrix, dim=0)
-#     diff = _calculate_matrix_diff(original_matrix, reconstructed_matrix)
-#     error_val = _calculate_l2_norm(diff)
-#     return {
-#         "avg_original_matrix": original_matrix,
-#         "avg_reconstructed_matrix": reconstructed_matrix,
-#         "avg_diff_matrix": diff,
-#         "avg_error_value": error_val
-#     }
-
-# def visualize_histogram(tensor, output_file):
-#     if len(tensor) == 0:
-#         return
-#     error_values = _calculate_l2_norm(tensor)
-    
-#     plt.figure(figsize=(8, 6))
-#     sns.histplot(error_values.numpy(), bins=50, color='teal', alpha=0.7)
-#     plt.title("Distribution of Reconstruction Errors (L2 Norm)")
-#     plt.xlabel("Error Score (Lower is Better)")
-#     plt.ylabel("Count of Data Points")
-#     plt.axvline(x=torch.mean(error_values).item(), color='red', linestyle='--', label='Mean Error')
-#     plt.legend()
-#     plt.savefig(output_file)
-#     plt.close()
-
-# def visualize_diff_heatmap(tensor, output_file):
-#     if len(tensor) == 0:
-#         return
-
-#     # 1. Calculate Mean Absolute Difference (Magnitude of error)
-#     # Good for spotting WHERE errors happen
-#     avg_abs_diff = torch.mean(torch.abs(tensor), dim=0).cpu()
-
-#     # 2. Calculate Mean Signed Difference (Bias)
-#     # Good for spotting if you consistently overestimate (+) or underestimate (-)
-#     avg_signed_diff = torch.mean(tensor, dim=0).cpu()
-    
-#     # Create a figure with 2 subplots side-by-side
-#     plt.figure(figsize=(16, 6))
-    
-#     # --- Plot 1: Absolute Difference ---
-#     sns.heatmap(avg_abs_diff.numpy(), 
-#                 cmap='Reds')
-#     plt.title("Mean ABSOLUTE Difference\n(How large is the error?)")
-#     plt.xlabel("Matrix Columns")
-#     plt.ylabel("Matrix Rows")
-#     plt.tight_layout()
-#     plt.savefig(output_file.replace(".png", "_abs.png"))
-#     plt.close()
-
-#     # --- Plot 2: Signed (Raw) Difference ---
-#     plt.figure(figsize=(16, 6))
-#     sns.heatmap(avg_signed_diff.numpy(), 
-#                 cmap='RdBu_r', # Diverging color (Blue -> White -> Red)
-#                 center=0)      # Forces White to be exactly 0
-#     plt.title("Mean SIGNED Difference\n(Bias: Blue=Under / Red=Over)")
-#     plt.xlabel("Matrix Columns")
-#     plt.ylabel("Matrix Rows")
-    
-#     plt.tight_layout()
-#     plt.savefig(output_file.replace(".png", "_signed.png"))
-#     plt.close()
 
 def main(decomposed_df, vanilla_df, no_mbr_df, oracle_df, output_dir=""):
     if "nmf" in decomposed_df["method"].unique()[0]:
@@ -392,27 +384,30 @@ def main(decomposed_df, vanilla_df, no_mbr_df, oracle_df, output_dir=""):
 
         analysis_filename = f"{output_dir}/{'-'.join(map(str, comb_row[checking_cols].values))}"
 
+        curr_param = "no_param"
         if "normed_svd" in comb_row['method']:
+            curr_param = "is_reduced-True-norm_dim-0"
             generate_param_effect_fig(filtered_df, "is_reduced", metric_name=comb_row['util_function'], output_dir=analysis_filename)
             generate_param_effect_fig(filtered_df, "norm_dim", metric_name=comb_row['util_function'], output_dir=analysis_filename)
 
-            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("is_reduced-True-norm_dim-0")]
+            filtered_df = filtered_df.loc[filtered_df["params"].str.contains(curr_param)]
         elif "svd" in comb_row['method']:
+            curr_param = "is_reduced-True"
             generate_param_effect_fig(filtered_df, "is_reduced", metric_name=comb_row['util_function'], output_dir=analysis_filename)
 
-            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("is_reduced-True")]
+            filtered_df = filtered_df.loc[filtered_df["params"].str.contains(curr_param)]
         elif "nmf" in comb_row['method']:
+            curr_param = "beta-0-l1_ratio-0.0"
             generate_param_effect_fig(filtered_df, "beta", metric_name=comb_row['util_function'], output_dir=analysis_filename)
             generate_param_effect_fig(filtered_df, "l1_ratio", metric_name=comb_row['util_function'], output_dir=analysis_filename)
 
-            filtered_df = filtered_df.loc[filtered_df["params"].str.contains("beta-1.0-l1_ratio-0.0")]
+            filtered_df = filtered_df.loc[filtered_df["params"].str.contains(curr_param)]
         
         generate_heatmap_matrices([matrices_list[0]]+filtered_df["matrices"].tolist(), title_list=[heatmap_title_list[0]]+filtered_df["heatmap_title"].tolist(), 
-            main_title=f"{comb_row['method']} - {comb_row['util_function']} - Matrices Drift by Top-K",
+            main_title=f"{comb_row['method']} - {comb_row['util_function']} - {curr_param} - Matrices Drift by Top-K",
             output_dir=analysis_filename)
 
+        generate_performance_fig(metrics, filtered_df, vanilla_scores=vanilla_scores, no_mbr_scores=no_mbr_scores, oracle_scores=oracle_scores.loc[oracle_scores["method"] == f"oracle_{comb_row['util_function']}"].copy(), output_dir=analysis_filename)
+
         for metric_name in metrics:
-            vanilla_score = vanilla_scores[metric_name].values[0] if metric_name in vanilla_scores else 0.0
-            no_mbr_score = no_mbr_scores[metric_name].values[0] if metric_name in no_mbr_scores else 0.0
-            oracle_score = oracle_scores.loc[oracle_scores["method"] == f"oracle_{metric_name}"][metric_name].values[0] if metric_name in oracle_scores else 0.0
-            generate_eval_fig(metric_name, filtered_df, vanilla_score, no_mbr_score, oracle_score, output_dir=analysis_filename)
+            generate_eval_fig(metric_name, filtered_df, output_dir=analysis_filename)
