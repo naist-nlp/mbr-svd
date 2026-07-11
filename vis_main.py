@@ -9,7 +9,8 @@ from argparse import ArgumentParser
 # from vis_load_data import compile_decodes, compile_scores, update_decode_status, get_combination_result, get_scores
 from vis_load_data import (compile_no_mbr_scores, 
                         compile_mbr_scores, 
-                        compile_oracle_scores)
+                        compile_oracle_scores,
+                        metrics_by_task)
 
 from vis_plots import main as visualize_plots
 
@@ -83,36 +84,67 @@ def main():
     cand_counts = args.cand_counts
     metadata_dir = args.metadata
     output_dir = args.output_dir
+    self_hyp_count = 64
 
     decompose_filename = f"{output_dir}/decompose_decode_status_{decompose_mode}.csv"
+    hyp_metadata = pd.read_csv(f"{metadata_dir}/hyp_metadata.csv")
+    score_metadata = pd.read_csv(f"{metadata_dir}/score_metadata.csv")
+    validated_metadata = pd.read_csv(f"{metadata_dir}/validated_metadata.csv")
 
     if process_type == "prepare_data":
-        hyp_metadata = pd.read_csv(f"{metadata_dir}/hyp_metadata.csv")
-        score_metadata = pd.read_csv(f"{metadata_dir}/score_metadata.csv")
-        validated_metadata = pd.read_csv(f"{metadata_dir}/validated_metadata.csv")
-
-        hyp_metadata = hyp_metadata.loc[hyp_metadata["dataset"] == "wmt22-ende"]
+        hyp_metadata = hyp_metadata.loc[hyp_metadata["dataset"].isin(["wmt22-ende", "wmt22-deen", "wmt23-ende", "wmt23-deen", "wmt22-enja", "wmt23-enja", "wmt22-jaen", "wmt23-jaen", "wmt22-enzh", "wmt23-enzh", "wmt22-zhen", "wmt23-zhen", "cnndm", "xsum"])]
 
         validated_metadata["supporting_files"] = validated_metadata["supporting_files"].apply(literal_eval)
         hyp_metadata["supporting_files"] = hyp_metadata["supporting_files"].apply(literal_eval)
 
+        validated_metadata = validated_metadata.loc[validated_metadata["supporting_files"].apply(lambda x: "file not found" in x.values()) == False]
+        # hyp_metadata = hyp_metadata.loc[hyp_metadata["task"] == "translation"]
+        # score_metadata = score_metadata.loc[score_metadata["task"] == "translation"]
+
+        existing_df = None
+        if os.path.exists(decompose_filename):
+            existing_df = pd.read_csv(decompose_filename)
+            if "bleu_corpus" not in existing_df.columns:
+                existing_df["bleu_corpus"] = np.nan
+            if "bertscore" not in existing_df.columns:
+                existing_df["bertscore"] = np.nan
+            for task in metrics_by_task.keys():
+                if task not in existing_df["task"].unique():
+                    for metric in metrics_by_task[task]:
+                        existing_df[metric] = np.nan
+                    continue
+                existing_df[metrics_by_task[task]] = existing_df[metrics_by_task[task]].replace(0.0, np.nan)
+
         if decompose_mode == "no_mbr":
-            results_df = compile_no_mbr_scores(hyp_metadata, score_metadata)
+            results_df = compile_no_mbr_scores(hyp_metadata, score_metadata, existing_df)
         elif decompose_mode == "oracle":
-            results_df = compile_oracle_scores(hyp_metadata, score_metadata)
+            results_df = compile_oracle_scores(hyp_metadata, score_metadata, existing_df)
         else:
-            results_df = compile_mbr_scores(hyp_metadata, score_metadata, validated_metadata, decompose_mode)
+            results_df = compile_mbr_scores(hyp_metadata, score_metadata, validated_metadata, decompose_mode, existing_df)
         results_df.to_csv(decompose_filename, index=False)
     elif process_type == "visualize":
         no_mbr_df = pd.read_csv(f"{output_dir}/decompose_decode_status_no_mbr.csv")
-        
         oracle_df = pd.read_csv(f"{output_dir}/decompose_decode_status_oracle.csv")
-
         vanilla_df = pd.read_csv(f"{output_dir}/decompose_decode_status_mbr.csv")
-
         decomposed_df = pd.read_csv(f"{output_dir}/decompose_decode_status_{decompose_mode}.csv")
-        validated_metadata = pd.read_csv(f"{metadata_dir}/validated_metadata.csv")
+
+        no_mbr_df = no_mbr_df.loc[(no_mbr_df["hyp_count"] == self_hyp_count)]
+        oracle_df = oracle_df.loc[(oracle_df["hyp_count"] == self_hyp_count)]
+        vanilla_df = vanilla_df.loc[(vanilla_df["hyp_count"] == self_hyp_count) & (vanilla_df["ref_count"].isin([4, 64, 256]))]
+        decomposed_df = decomposed_df.loc[(decomposed_df["hyp_count"] == self_hyp_count) & (decomposed_df["ref_count"].isin([4, 64, 256]))]
+
         validated_metadata.rename(columns={"decompose_mode": "method"}, inplace=True)
+        score_metadata["metric_name"] = score_metadata["metric_name"].apply(lambda x: f"oracle_{x}")
+
+        no_mbr_df = pd.merge(no_mbr_df, hyp_metadata,
+            left_on=["task", "dataset", "hyp_sampling", "hyp_count"], 
+            right_on=["task", "dataset", "hyp_sampling", "hyp_count"], 
+            how="inner")
+
+        oracle_df = pd.merge(oracle_df, score_metadata, 
+            left_on=["task", "dataset", "hyp_sampling", "hyp_count", "method"],
+            right_on=["task", "dataset", "hyp_sampling", "hyp_count", "metric_name"],
+            how="inner")
 
         vanilla_df = pd.merge(vanilla_df, validated_metadata.loc[validated_metadata["method"] == "mbr"], 
             left_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function"], 
@@ -124,8 +156,7 @@ def main():
             right_on=["task", "dataset", "hyp_sampling", "hyp_count","ref_sampling", "ref_count", "method", "util_function", "params"], 
             how="inner")
 
-        decomposed_df = decomposed_df.loc[decomposed_df["hyp_count"].isin([64]) & (decomposed_df["ref_count"].isin([4, 64, 256]))]
-
+        no_mbr_df["supporting_files"] = no_mbr_df["supporting_files"].apply(literal_eval)
         decomposed_df["supporting_files"] = decomposed_df["supporting_files"].apply(literal_eval)
         vanilla_df["supporting_files"] = vanilla_df["supporting_files"].apply(literal_eval)
 

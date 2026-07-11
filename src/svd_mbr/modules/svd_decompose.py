@@ -63,4 +63,4 @@ def svd_decomposition(
         decomposed_matrix = decomposed_matrix.detach()
         S = S.detach()
 
-    return decomposed_matrix, S
+    return decomposed_matrix, S, U, Vh
