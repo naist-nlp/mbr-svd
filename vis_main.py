@@ -90,6 +90,7 @@ def main():
     hyp_metadata = pd.read_csv(f"{metadata_dir}/hyp_metadata.csv")
     score_metadata = pd.read_csv(f"{metadata_dir}/score_metadata.csv")
     validated_metadata = pd.read_csv(f"{metadata_dir}/validated_metadata.csv")
+    # validated_metadata = pd.read_csv(f"{metadata_dir}/ensemble_metadata.csv")
 
     if process_type == "prepare_data":
         hyp_metadata = hyp_metadata.loc[hyp_metadata["dataset"].isin(["wmt22-ende", "wmt22-deen", "wmt23-ende", "wmt23-deen", "wmt22-enja", "wmt23-enja", "wmt22-jaen", "wmt23-jaen", "wmt22-enzh", "wmt23-enzh", "wmt22-zhen", "wmt23-zhen", "cnndm", "xsum"])]

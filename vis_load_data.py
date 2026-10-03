@@ -13,6 +13,7 @@ hyps_path = "/var/autofs/cl/home2/share/mbrs/generated_text"
 result_path = "/var/autofs/cl/home2/share/mbrs/results"
 score_path = "/var/autofs/cl/home2/share/mbrs/scores"
 validated_path = "/var/autofs/cl/home2/share/mbrs/validated"
+# validated_path = "/var/autofs/cl/home2/share/mbrs/ensemble"
 # analysis_path = "/var/autofs/cl/home2/share/mbrs/analysis"
 translation_metrics = ["bleu", "chrf", "comet", "bleurt", "cometkiwi", "bleu_corpus", "bertscore"]
 summarization_metrics = ["rouge_1", "rouge_2", "rouge_l", "rouge_lsum", "bertscore"]
@@ -224,7 +225,7 @@ def compile_mbr_scores(hyp_metadata, score_metadata, validated_metadata, mbr_typ
                 selected_indices = literal_eval(existing_row["selected_indexes"].iloc[0])
                 calc_bleu_corpus = True if existing_row["bleu_corpus"].isnull().any() else False
         if selected_indices == []:
-            if mbr_type == "mbr":
+            if mbr_type in ["mbr", "normed_mbr"]:
                 selected_indices = get_vanilla_mbr_indices(row)
             elif mbr_type in ["model_mbr", "probabilistic_mbr", "model_norm_mbr"]:
                 selected_indices = get_other_mbr_indices(row)
