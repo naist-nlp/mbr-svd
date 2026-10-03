@@ -1,0 +1,6 @@
+decoder:
+  niter: 10
+  rank: 8
+  reduction_factor: ${reduction_factor}
+  regularization_weight: 0.1
+  seed: ${seed}

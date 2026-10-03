@@ -1,0 +1,12 @@
+common:
+  hypotheses: generated_text/${TASK}/${SUBSET}.tgt.${decoding_hyp}.${NUM_hyp}
+  num_candidates: ${NUM_hyp}
+  nbest: 1
+  source: data/${TASK}/${SUBSET}.src
+  references: data/${TASK}/${SUBSET}.tgt
+  num_references: 1
+  output: ${DIR}/${SUBSET}.tgt.${METRICS}-oracle.${decoding_hyp}.${NUM_hyp}-${decoding_ref}.${NUM_ref}
+  report: ${DIR}/${SUBSET}.tgt.${METRICS}-oracle.${decoding_hyp}.${NUM_hyp}-${decoding_ref}.${NUM_ref}.logs
+  report_format: tsv
+  decoder: ${DECODING}
+  metric: ${METRICS}

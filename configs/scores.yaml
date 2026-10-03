@@ -1,0 +1,7 @@
+common:
+  hypotheses: ${HYP_DIR}/${SUBSET}.tgt.${METRICS}-${DECODING}.${decoding_hyp}.${NUM_hyp}-${decoding_ref}.${NUM_ref}
+  sources: ${DATA_DIR}/${SUBSET}.src
+  references: [${DATA_DIR}/${SUBSET}.tgt]
+  format: json
+  width: 3
+  metric: ${EVAL_METRICS}

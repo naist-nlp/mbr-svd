@@ -1,0 +1,5 @@
+decoder:
+  top_k_sv: 0
+  bottom_k_sv: 0
+  is_reduced: True
+  

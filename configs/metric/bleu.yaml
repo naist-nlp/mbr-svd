@@ -1,0 +1,3 @@
+metric:
+  effective_order: true
+  trg_lang: ${LANG}

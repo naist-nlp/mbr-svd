@@ -1,0 +1,4 @@
+metric:
+  model: Unbabel/wmt22-comet-da
+  batch_size: 256
+  fp16: true

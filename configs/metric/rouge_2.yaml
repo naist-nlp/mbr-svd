@@ -1,0 +1,4 @@
+metric:
+  which_rouge: rouge2
+  rouge_types:
+    - rouge2

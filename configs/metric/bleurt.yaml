@@ -1,0 +1,4 @@
+metric:
+  model: lucadiliello/BLEURT-20-D12
+  batch_size: 256
+  fp16: true

@@ -1,0 +1,4 @@
+metric:
+  batch_size: 16
+  model_type: microsoft/deberta-xlarge-mnli
+  idf: False
