@@ -8,8 +8,9 @@ def svd_decomposition(
     matrix: Tensor, 
     top_k: Optional[int]=None,
     bottom_k: Optional[int]=None, 
-    is_reduced=False,
-    device: Optional[torch.device]=None
+    is_reduced: bool=False,
+    device: Optional[torch.device]=None,
+    variants: Optional[str]=None
     ) -> tuple[Tensor, Tensor]:
     """Compute the singular value decomposition (SVD) of a matrix.
 
@@ -19,6 +20,9 @@ def svd_decomposition(
         bottom_k (int, optional): Number of bottom singular values to keep. If None, keep all. If both top_k and bottom_k are provided, ignore bottom_k.
         is_reduced (bool, optional): Whether to use reduced SVD.
         device (torch.device, optional): Device to perform computation on. If None, use GPU if available.
+        variants (str, optional): SVD variant to use. If None, use top-k. Options are: ["skip_top1", "only_k"]
+            - "skip_top1": Skip the top-1 singular value and keep the rest.
+            - "only_k": Only keep the k-th singular value for reconstruction.
     Returns:
         Tensor: Decomposed matrix after filtering small singular values.
         Tensor: Top-k singular values.
@@ -44,6 +48,21 @@ def svd_decomposition(
         U = U[:, (rank-bottom_k):rank]
         S = S[(rank-bottom_k):rank]
         Vh = Vh[(rank-bottom_k):rank, :]
+    if variants == "skip_top1":
+        if rank > 1:
+            U = U[:, 1:]
+            S = S[1:]
+            Vh = Vh[1:, :]
+        else:
+            # If there's only one singular value, we can't skip it
+            pass
+    elif variants == "only_k":
+        if top_k is not None and top_k <= rank:
+            U = U[:, top_k-1:top_k]
+            S = S[top_k-1:top_k]
+            Vh = Vh[top_k-1:top_k, :]
+        else:
+            raise ValueError(f"Invalid top_k value {top_k} for only_k variant. Must be between 1 and {rank}.")
     if is_reduced:
         decomposed_matrix = (U * S) @ Vh
     else:
@@ -63,4 +82,4 @@ def svd_decomposition(
         decomposed_matrix = decomposed_matrix.detach()
         S = S.detach()
 
-    return decomposed_matrix, S, U, Vh
+    return decomposed_matrix, S

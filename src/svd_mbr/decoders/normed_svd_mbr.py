@@ -75,7 +75,8 @@ class DecoderNormedSvdMBR(DecoderSvdMBR):
                     normed_pairwise_scores, 
                     top_k=None if self.cfg.top_k_sv == 0 else self.cfg.top_k_sv,
                     bottom_k=None if self.cfg.bottom_k_sv == 0 else self.cfg.bottom_k_sv,
-                    is_reduced=self.cfg.is_reduced
+                    is_reduced=self.cfg.is_reduced,
+                    variants=self.cfg.variants
                 )
             with timer.measure("expectation"):
                 expected_scores = functional.expectation(

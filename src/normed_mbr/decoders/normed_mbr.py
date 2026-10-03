@@ -10,11 +10,11 @@ from mbrs import functional, timer
 
 from mbrs.decoders import register
 from mbrs.decoders.mbr import DecoderMBR
-from ..modules.svd_decompose import svd_decomposition
+from ..modules.z_score_norm import z_score_norm
 
-@register("svd_mbr")
-class DecoderSvdMBR(DecoderMBR):
-    """SVD-based MBR decoder.
+@register("normed_mbr")
+class DecoderNormedMBR(DecoderMBR):
+    """Z-score normalized MBR decoder.
     """
 
     cfg: Config
@@ -22,29 +22,18 @@ class DecoderSvdMBR(DecoderMBR):
     @dataclass
     class Config(DecoderMBR.Config):
         """Configuration for the decoder.
-
-        - top_k_sv (int, optional): Only get the top-k singular values. If None, no SVD is applied. if 0, all singular values are kept.
-        - bottom_k_sv (int, optional): Only get the bottom-k singular values. If None, no SVD is applied. if 0, all singular values are kept.
-        - is_reduced (bool): Whether to use reduced SVD.
-        - save_components (bool): Whether to save calculated components or not
-        - variants (str, optional): SVD variant to use. If None, use top-k. Options are: ["skip_top1", "only_k"]
-            - "skip_top1": Skip the top-1 singular value and keep the rest.
-            - "only_k": Only keep the k-th singular value for reconstruction.
+        Initially inherits from DecoderMBR.Config.
+        - norm_dim (int, optional): Dimension along which to normalize. If None, normalize over the entire matrix.
         """
-
-        top_k_sv: Optional[int] = None
-        bottom_k_sv: Optional[int] = None
-        is_reduced: bool = False
+        norm_dim: Optional[int] = None
+        norm_eps: float = 1e-8
         save_components: bool = True
-        variants: Optional[str] = None
-    
+
     @dataclass
     class Output(DecoderMBR.Output):
-        """Output of the SVD MBR decoder.
+        """Output of the Normed MBR decoder.
         """
         original_matrix: Optional[Tensor] = None
-        singularvals: Optional[Tensor] = None
-        decomposed_matrix: Optional[Tensor] = None
 
     def pairwise_scoring(
         self,
@@ -76,7 +65,7 @@ class DecoderSvdMBR(DecoderMBR):
         source: Optional[str] = None,
         nbest: int = 1,
         reference_lprobs: Optional[Tensor] = None,
-    ) -> DecoderSvdMBR.Output:
+    ) -> DecoderNormedMBR.Output:
         """Select the n-best hypotheses based on the strategy.
 
         Args:
@@ -88,33 +77,22 @@ class DecoderSvdMBR(DecoderMBR):
               The shape must be `(len(references),)`. See `https://arxiv.org/abs/2311.05263`.
 
         Returns:
-            DecoderSvdMBR.Output: The n-best hypotheses.
+            DecoderNormedMBR.Output: The n-best hypotheses.
         """
         pairwise_scores = self.pairwise_scoring(hypotheses, references, source)
             
-        if self.cfg.top_k_sv is None and self.cfg.bottom_k_sv is None: # Naive MBR decoding
-            print("Warning: Using Naive MBR decoding instead of SVD MBR decoding.")
-            with timer.measure("expectation"):
-                expected_scores = functional.expectation(
-                    matrix=pairwise_scores,
-                    lprobs=reference_lprobs,
-                )
-            singularvals = None
-            dec_pairwise_scores = None
-        else:  # SVD MBR decoding
-            with timer.measure("svd_decomposition"):
-                dec_pairwise_scores, singularvals = svd_decomposition(
-                    pairwise_scores, 
-                    top_k=None if self.cfg.top_k_sv == 0 else self.cfg.top_k_sv,
-                    bottom_k=None if self.cfg.bottom_k_sv == 0 else self.cfg.bottom_k_sv,
-                    is_reduced=self.cfg.is_reduced,
-                    variants=self.cfg.variants
-                )
-            with timer.measure("expectation"):
-                expected_scores = functional.expectation(
-                    dec_pairwise_scores, 
-                    lprobs=reference_lprobs
-                )
+        with timer.measure("z_score_normalization"):
+            normed_pairwise_scores = z_score_norm(pairwise_scores, dim=self.cfg.norm_dim, epsilon=self.cfg.norm_eps)
+
+        if not torch.isfinite(normed_pairwise_scores).all():
+            print("Pairwise scores after normalization:", normed_pairwise_scores)
+            raise ValueError("Non-finite values found in the normalized pairwise score matrix.")
+
+        with timer.measure("expectation"):
+            expected_scores = functional.expectation(
+                normed_pairwise_scores, 
+                lprobs=reference_lprobs
+            )
         
         selector_outputs = self.select(
             hypotheses, expected_scores, nbest=nbest, source=source
@@ -125,9 +103,7 @@ class DecoderSvdMBR(DecoderMBR):
                     idx=selector_outputs.idx,
                     sentence=selector_outputs.sentence,
                     score=selector_outputs.score,
-                    singularvals=singularvals,
-                    original_matrix=pairwise_scores,
-                    decomposed_matrix=dec_pairwise_scores,
+                    original_matrix=normed_pairwise_scores,
                 )
             )
         else:
