@@ -1,0 +1,13 @@
+common:
+  hypotheses: ${HYP_DIR}/${SUBSET}.tgt.${decoding_hyp}.${NUM_hyp}
+  num_candidates: ${NUM_hyp}
+  num_references: ${NUM_ref}
+  nbest: 1
+  source: ${DATA_DIR}/${SUBSET}.src
+  references: ${REF_DIR}/${SUBSET}.tgt.${decoding_ref}.${NUM_ref}
+  format: plain
+  output: ${CONFIG_FILENAME}
+  report: ${CONFIG_FILENAME}.logs
+  report_format: tsv
+  decoder: ${DECODER_TYPE}
+  metric: ${METRICS}
