@@ -27,8 +27,7 @@ mbr-svd/
 ├── src/                     # Decoders, as an mbrs plugin
 │   ├── svd_mbr/             #   normed_svd_mbr (SVD-MBR in the paper) and svd_mbr (without normalization)
 │   ├── normed_mbr/          #   normed_mbr: MBR on the z-score normalized matrix (ablation)
-│   ├── nmf_mbr/             #   nmf_mbr: non-negative matrix factorization variant
-│   └── component_saving/    #   component_saving_wrapper: saves pairwise matrices for analysis
+│   └── component_saving/    #   component_saving_wrapper: saves standard MBR, PMBR, and Model-based MBR pairwise matrices for analysis
 ├── configs/                 # mbrs config templates (common settings, decoders, metrics)
 ├── scripts/                 # Experiment pipeline: download, generate, decode, score
 ├── analysis/                # Analysis code for the paper's figures and tables
@@ -113,7 +112,6 @@ print(output.sentence, output.idx)  # ['this is a test'] [0]
 | `normed_svd_mbr` | **SVD-MBR** (the proposed method): z-score normalization, then a truncated SVD reconstruction |
 | `svd_mbr` | Truncated SVD reconstruction without normalization |
 | `normed_mbr` | MBR on the z-score normalized matrix, without SVD |
-| `nmf_mbr` | Low-rank reconstruction with non-negative matrix factorization |
 | `component_saving_wrapper` | Wraps a decoder and saves its intermediate matrices for analysis |
 
 `svd_mbr` and `normed_svd_mbr`:
@@ -127,18 +125,16 @@ print(output.sentence, output.idx)  # ['this is a test'] [0]
 | `norm_dim` | `None` | (`normed_svd_mbr` only) Normalization axis. `None` normalizes over the whole matrix, as in the paper. |
 | `norm_eps` | `1e-8` | (`normed_svd_mbr` only) Epsilon added to the standard deviation. |
 
-`nmf_mbr` takes `rank` (`0` means min(|H|, |Y|)/2), `beta` (β-divergence, default `1.0` = KL divergence) and `l1_ratio` (default `0.0`).
-
 ## Reproducing the experiments
 
-The scripts in `scripts/` are numbered in the order they are run. They were written for a SLURM cluster: settings such as the dataset, metric and decoder are chosen by editing the variables at the top of each script, and sweeps use `SLURM_ARRAY_TASK_ID`. Data and outputs go under `MAIN_DIR`, so set it to your own storage before running.
+The scripts in `scripts/` are numbered in the order they are run. Data and outputs go under `MAIN_DIR`, so set it to your own storage before running.
 
 | Step | Script | Description |
 |---|---|---|
 | 1 | `00.download.{translation,summarization}.sh` | Download WMT22/WMT23 (via sacrebleu), XSum and CNN/DailyMail |
 | 2 | `10.generate.{translation,summarization}.sh` | Sample hypotheses / pseudo-references (`scripts/generate.py`), e.g. epsilon sampling with M2M-100 |
 | 3 | `20.decode.sh` | Standard MBR decoding |
-| 3 | `27.decode.parameters.sh` | SVD-MBR / NMF-MBR decoding over hypothesis and reference pool sizes |
+| 3 | `27.decode.parameters.sh` | SVD-MBR decoding over hypothesis and reference pool sizes |
 | 3 | `26.decode.save_components.sh` | Decoding that also saves the pairwise matrices used in the analysis |
 | 4 | `30.score.sh` | Score the selected outputs with every evaluation metric |
 | 4 | `32.score.oracle.sh` | Score every hypothesis, for the oracle and the sentence-level analyses |
@@ -151,12 +147,9 @@ Evaluation metrics: BLEU, chrF, BLEURT, COMET, BERTScore and COMETKiwi for trans
 
 ```bash
 cd analysis
-export MBR_RESULT_DIR=../results/20260520   # folder with the decompose_decode_status_*.csv files
-export MBR_OUTPUT_DIR=outputs                # where tables (.tex/.csv) and figures are written
-MPLBACKEND=Agg python -m src.performance_tables
 ```
 
-`analysis/run_analysis.sh` runs every analysis in order, either sequentially or as one SLURM array task per analysis. The analyses read the result CSVs (`results/`), the metadata index (`metadata/`), and the saved matrices and sentence-level scores. The locations of the matrices and scores are set in `analysis/src/config.py`.
+`analysis/run_analysis.sh` runs every analysis in order. The analyses read the result CSVs (`results/`), the metadata index (`metadata/`), and the saved matrices and sentence-level scores. The locations of the matrices and scores are set in `analysis/src/config.py`.
 
 ## Citation
 
