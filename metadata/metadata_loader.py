@@ -7,12 +7,10 @@ from argparse import ArgumentParser
 
 
 # from vis_load_data import compile_decodes, compile_scores, update_decode_status, get_combination_result, get_scores
-from vis_load_data import (compile_no_mbr_scores, 
+from load_metric_data import (compile_no_mbr_scores, 
                         compile_mbr_scores, 
                         compile_oracle_scores,
                         metrics_by_task)
-
-from vis_plots import main as visualize_plots
 
 metadata_dir = "metadata"
 
@@ -161,7 +159,7 @@ def main():
         decomposed_df["supporting_files"] = decomposed_df["supporting_files"].apply(literal_eval)
         vanilla_df["supporting_files"] = vanilla_df["supporting_files"].apply(literal_eval)
 
-        visualize_plots(decomposed_df, vanilla_df, no_mbr_df, oracle_df, output_dir=output_dir)
+        # visualize_plots(decomposed_df, vanilla_df, no_mbr_df, oracle_df, output_dir=output_dir)
 
     # try:
     #     decode_df = pd.read_csv(decompose_filename)

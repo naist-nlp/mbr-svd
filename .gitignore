@@ -5,8 +5,7 @@ __pycache__/
 
 log/
 results/
-analysis/
-metadata/
+metadata/*.csv
 playground.*
 *.bash
 *.justfile
